@@ -15,6 +15,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 from unittest.mock import patch
 
 from openpyxl import Workbook
+from pptx import Presentation
 
 from reports import analytical_pdf_bytes
 from server import create_server, init_db
@@ -98,7 +99,7 @@ class PlannerTest(unittest.TestCase):
         with closing(sqlite3.connect(self.db_path)) as db:
             for table in ("files", "questionnaires", "responses", "refusals", "weighting", "submissions",
                           "study_messages", "study_quotas", "study_associations", "study_members", "member_quotas",
-                          "public_links", "focus_sessions", "editor_drafts", "analytical_reports"):
+                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports", "presentations"):
                 self.assertEqual(db.execute(f"SELECT COUNT(*) FROM {table} WHERE study_id = ?", (sid,)).fetchone()[0], 0)
 
     def test_calendar_tasks_files_summary_and_permissions(self):
@@ -612,6 +613,48 @@ class PlannerTest(unittest.TestCase):
             self.assertNotIn("конфиденциальный ответ", sent)
             self.assertIn("Комментарий", sent)
             self.assertTrue(self.request(self.admin, path + ".pdf", binary=True)[1].startswith(b"%PDF-"))
+
+    def test_presentation_generation_edit_export_and_staleness(self):
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        self.request(self.admin, "/users", "POST", {"name": "Интервьюер", "email": "field@test.org", "password": "secure-pass-456", "role": "interviewer"})
+        self.request(self.interviewer, "/login", "POST", {"email": "field@test.org", "password": "secure-pass-456"})
+        sid = self.request(self.admin, "/studies", "POST", {"title": "Исследование"})[1]["id"]
+        path = f"/studies/{sid}/presentation"
+        self.assertEqual(self.request(self.admin, path)[1]["presentation"], None)
+        self.assertEqual(self.request(self.interviewer, path)[0], 403)
+        self.assertEqual(self.request(self.interviewer, path, "POST", {"slide_count": 3})[0], 403)
+        self.assertEqual(self.request(self.admin, path + ".pptx", binary=True)[0], 404)
+        colors = {"background": "#ffffff", "text": "#193a54", "accent": "#14527c"}
+        request = {"slide_count": 3, "prompt": "Сосредоточься на ограничениях", "colors": colors}
+        self.assertEqual(self.request(self.admin, path, "POST", request)[0], 409)
+        self.request(self.admin, f"/studies/{sid}/questionnaire", "POST", {"questions": [
+            {"type": "text", "label": "Комментарий"}]})
+        for _ in range(10):
+            self.request(self.admin, f"/studies/{sid}/responses", "POST", {"answers": {"q1": "личный ответ"}})
+        with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value="Обзор и выводы"):
+            self.assertEqual(self.request(self.admin, f"/studies/{sid}/analytical-report", "POST", {})[0], 200)
+        outline = json.dumps({"slides": [{"title": f"Слайд {i}", "bullets": ["Вывод по отчёту"]} for i in range(1, 4)]})
+        with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value=outline) as ai:
+            status, response = self.request(self.admin, path, "POST", request)
+            self.assertEqual(status, 200)
+            sent = json.loads(ai.call_args.args[0]["messages"][1]["content"])
+            self.assertEqual(sent["wishes"], request["prompt"])
+            self.assertNotIn("личный ответ", json.dumps(sent, ensure_ascii=False))
+        deck = response["presentation"]
+        self.assertEqual(len(deck["slides"]), 3)
+        self.assertFalse(self.request(self.admin, path)[1]["stale"])
+        deck["slides"][0]["elements"][0].update(text="Перемещённый заголовок", x=10, y=15)
+        self.assertEqual(self.request(self.admin, path, "PUT", deck)[0], 200)
+        self.assertEqual(self.request(self.admin, path)[1]["presentation"]["slides"][0]["elements"][0]["x"], 10)
+        pptx = self.request(self.admin, path + ".pptx", binary=True)[1]
+        slides = Presentation(io.BytesIO(pptx)).slides
+        self.assertEqual(len(slides), 3)
+        self.assertEqual(slides[0].shapes[0].text, "Перемещённый заголовок")
+        self.assertEqual(self.request(self.admin, path, "PUT", {**deck, "colors": {**colors, "accent": "red"}})[0], 400)
+        self.assertEqual(self.request(self.admin, path, "PUT", {**deck, "slides": [{"elements": [{"kind": "body", "text": "x", "x": -1, "y": 0, "w": 20, "h": 10}]}] * 3})[0], 400)
+        with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value="Новый текст записки"):
+            self.assertEqual(self.request(self.admin, f"/studies/{sid}/analytical-report", "POST", {})[0], 200)
+        self.assertTrue(self.request(self.admin, path)[1]["stale"])
 
 
 if __name__ == "__main__":

@@ -160,6 +160,14 @@
     .report-section { margin-top:18px; }
     .analytical-body { margin-top:18px; padding:22px; border:1px solid var(--line); border-radius:10px; background:#f9fbfc; overflow-wrap:anywhere; line-height:1.5; font:14pt/1.5 "Times New Roman",Times,serif; text-align:justify; }
     .analytical-body p { text-indent:1.25cm; margin:0 0 1em; }
+    .slide-stage { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; border:1px solid var(--line); border-radius:9px; }
+    .slide-element { position:absolute; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; cursor:grab; touch-action:none; font-size:clamp(10px,1.5vw,18px); line-height:1.3; user-select:none; }
+    .slide-element.title { font-size:clamp(14px,2.3vw,29px); font-weight:700; }
+    .slide-element.selected { outline:2px dashed currentColor; outline-offset:2px; }
+    .slide-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
+    .slide-tools select { width:auto; }
+    .presentation-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0; }
+    .presentation-fields input[type=color] { width:100%; height:40px; padding:2px; }
     .report-chart { display:grid; gap:10px; margin-top:16px; }
     .report-bar-row { display:grid; grid-template-columns:minmax(100px,1fr) minmax(90px,2fr) 54px; gap:10px; align-items:center; font-size:12px; }
     .report-bar-label { overflow-wrap:anywhere; }
@@ -377,7 +385,7 @@
       if (calendarView && !state.offline) loadCalendar();
       if (state.selected != null && canManage()) {
         const s = study(state.selected);
-         if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(s.id, event.currentTarget); }
+         if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section><section class="box report-section"><div class="box-title"><h2>Презентация по записке</h2></div><p class="muted">Сначала сформируйте аналитическую записку. Опишите желаемые акценты, задайте число слайдов и цвета; после генерации редактируйте текст и перетаскивайте блоки мышью или касанием. Сохраните правки перед скачиванием PPTX.</p><form id="presentation-form" class="form-grid"><div><label class="field-label" for="presentation-prompt">Пожелания к презентации</label><textarea id="presentation-prompt" maxlength="2000" placeholder="Например: акцентируй выводы по вопросам и ограничения исследования"></textarea></div><div class="presentation-fields"><div><label class="field-label" for="presentation-count">Слайдов (3–20)</label><input id="presentation-count" type="number" min="3" max="20" value="6" required></div><div><label class="field-label" for="presentation-background">Фон</label><input id="presentation-background" type="color" value="#ffffff"></div><div><label class="field-label" for="presentation-text">Текст</label><input id="presentation-text" type="color" value="#193a54"></div><div><label class="field-label" for="presentation-accent">Акцент</label><input id="presentation-accent" type="color" value="#14527c"></div></div><button class="btn small" type="submit">Сформировать презентацию с ИИ</button></form><div id="presentation-content" aria-live="polite">Загружаем презентацию…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); loadPresentation(s.id); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(s.id, event.currentTarget); document.querySelector('#presentation-form').onsubmit = event => generatePresentation(event,s.id); }
       }
       document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => { if (editorState.dirty && !confirm('Несохранённый текст редактора будет потерян. Продолжить?')) return; editorState.dirty = false; state.tab = button.dataset.tab; state.selected = null; render(); });
       document.querySelector('#logout').onclick = async () => { try { if (!state.offline) await api('/logout','POST',{}); await store('cache','readwrite', items => items.delete('current')); clearTimeout(editorState.hintTimer); Object.assign(editorState,{dirty:false,history:[],hintRequest:editorState.hintRequest+1}); state.user = null; state.selected = null; state.tab = 'overview'; renderAuth(false); } catch (error) { notify(error.message,true); } };
@@ -954,6 +962,86 @@
         notify('Аналитическая записка сохранена');
       } catch (error) { notify(error.message, true); }
       finally { if (button.isConnected) { button.disabled = false; button.textContent = 'Сформировать с ИИ'; } }
+    }
+    let presentationDeck = null;
+    async function loadPresentation(studyId) {
+      const container = document.querySelector('#presentation-content');
+      if (!container) return;
+      try {
+        const result = await api(`/studies/${studyId}/presentation`);
+        if (!container.isConnected || state.selected !== studyId) return;
+        presentationDeck = result.presentation;
+        if (presentationDeck) {
+          for (const key of ['background','text','accent']) document.querySelector(`#presentation-${key}`).value = presentationDeck.colors[key];
+          document.querySelector('#presentation-count').value = presentationDeck.slides.length;
+        }
+        renderPresentation(studyId,result.stale);
+      } catch (error) { if (container.isConnected) container.textContent = `Не удалось загрузить презентацию: ${error.message}`; }
+    }
+    async function generatePresentation(event,studyId) {
+      event.preventDefault();
+      if (!confirm('Отправить сохранённую записку и обезличенную статистическую основу в DeepSeek? Существующая презентация будет заменена.')) return;
+      const form = event.currentTarget, button = form.querySelector('button[type=submit]');
+      button.disabled = true;
+      try {
+        await api(`/studies/${studyId}/presentation`,'POST',{
+          prompt:form.querySelector('#presentation-prompt').value,
+          slide_count:Number(form.querySelector('#presentation-count').value),
+          colors:Object.fromEntries(['background','text','accent'].map(key => [key,form.querySelector(`#presentation-${key}`).value]))
+        });
+        await loadPresentation(studyId); notify('Презентация сохранена');
+      } catch (error) { notify(error.message,true); }
+      finally { if (button.isConnected) button.disabled = false; }
+    }
+    function renderPresentation(studyId,stale=false) {
+      const container = document.querySelector('#presentation-content');
+      if (!container) return;
+      if (!presentationDeck) { container.innerHTML = '<p class="muted">Презентация ещё не создана.</p>'; return; }
+      container.innerHTML = `${stale ? '<p style="color:#a34a25">Данные или записка изменились после генерации презентации. Обновите материалы перед передачей.</p>' : ''}<div class="slide-tools"><label for="slide-select">Слайд</label><select id="slide-select">${presentationDeck.slides.map((_,i) => `<option value="${i}">${i+1} / ${presentationDeck.slides.length}</option>`).join('')}</select><button type="button" class="btn small" id="slide-save">Сохранить правки</button><a class="btn small secondary" href="/api/studies/${studyId}/presentation.pptx">Скачать PPTX ↓</a></div><div id="slide-stage" class="slide-stage"></div><div id="slide-editor"></div><p class="muted">Выберите блок для редактирования текста; потяните блок на слайде для перемещения. Изменения сохраняются кнопкой выше.</p>`;
+      const select = container.querySelector('#slide-select'), stage = container.querySelector('#slide-stage'), editor = container.querySelector('#slide-editor');
+      let selected = 0;
+      const show = () => {
+        const colors = presentationDeck.colors, elements = presentationDeck.slides[Number(select.value)].elements;
+        selected = Math.min(selected,elements.length-1);
+        stage.style.backgroundColor = colors.background;
+        stage.innerHTML = '';
+        elements.forEach((element,i) => {
+          const node = document.createElement('div');
+          node.className = `slide-element ${element.kind}${i === selected ? ' selected' : ''}`;
+          node.textContent = element.text;
+          Object.assign(node.style,{left:`${element.x}%`,top:`${element.y}%`,width:`${element.w}%`,height:`${element.h}%`,color:element.kind === 'title' ? colors.accent : colors.text});
+          node.onpointerdown = event => {
+            if (event.button !== 0) return;
+            selected = i; showEditor();
+            stage.querySelectorAll('.slide-element').forEach((item,n) => item.classList.toggle('selected',n === i));
+            const startX = event.clientX, startY = event.clientY, x = element.x, y = element.y;
+            node.setPointerCapture(event.pointerId);
+            node.onpointermove = move => {
+              if (!node.hasPointerCapture(move.pointerId)) return;
+              element.x = Math.round(Math.max(0,Math.min(100-element.w,x + (move.clientX-startX)/stage.clientWidth*100))*10)/10;
+              element.y = Math.round(Math.max(0,Math.min(100-element.h,y + (move.clientY-startY)/stage.clientHeight*100))*10)/10;
+              node.style.left = `${element.x}%`; node.style.top = `${element.y}%`;
+            };
+            node.onpointerup = () => { node.onpointermove = null; };
+          };
+          stage.append(node);
+        });
+        showEditor();
+      };
+      const showEditor = () => {
+        const element = presentationDeck.slides[Number(select.value)].elements[selected];
+        editor.innerHTML = `<label class="field-label" for="slide-text">${element.kind === 'title' ? 'Заголовок' : 'Текст'} — объект ${selected+1}</label><textarea id="slide-text" maxlength="1200"></textarea>`;
+        const input = editor.querySelector('textarea'); input.value = element.text;
+        input.oninput = () => { element.text = input.value; stage.children[selected].textContent = input.value; };
+      };
+      select.onchange = () => { selected = 0; show(); };
+      container.querySelector('#slide-save').onclick = async event => {
+        const button = event.currentTarget; button.disabled = true;
+        try { await api(`/studies/${studyId}/presentation`,'PUT',presentationDeck); notify('Правки презентации сохранены'); }
+        catch (error) { notify(error.message,true); }
+        finally { if (button.isConnected) button.disabled = false; }
+      };
+      show();
     }
     function questionBlock(q={ type:'text', label:'', options:[], required:false }) {
       return `<div class="question-edit"><div class="question-top"><strong>ВОПРОС</strong><button type="button" class="text-button remove-question">Удалить</button></div><div class="form-two"><div><label class="field-label">Формулировка *</label><input class="q-label" required maxlength="250" value="${esc(q.label)}" placeholder="Ваш вопрос"></div><div><label class="field-label">Тип ответа</label><select class="q-type">${Object.entries(types).map(([key,label]) => `<option value="${key}" ${q.type === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><div class="q-options-wrap" style="${['single','multiple'].includes(q.type) ? '' : 'display:none'}"><label class="field-label">Варианты ответа (по одному на строке)</label><textarea class="q-options" placeholder="Да&#10;Нет&#10;Затрудняюсь ответить">${esc(q.options.join('\n'))}</textarea></div><label class="check-label"><input class="q-required" type="checkbox" ${q.required ? 'checked' : ''}> Обязательный вопрос</label></div>`;
