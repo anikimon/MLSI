@@ -19,7 +19,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from reports import analytical_pdf_bytes, analytical_snapshot, build_member_quotas, build_quotas, build_report, parse_weight, pdf_bytes, read_excel
@@ -171,6 +171,18 @@ def init_db(path):
                 snapshot TEXT NOT NULL, digest TEXT NOT NULL, content TEXT NOT NULL,
                 generated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS calendar_tasks (
+                id INTEGER PRIMARY KEY, study_id INTEGER REFERENCES studies(id),
+                title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                due_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'planned',
+                created_by INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS calendar_tasks_date ON calendar_tasks(due_date);
+            CREATE TABLE IF NOT EXISTS calendar_files (
+                id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES calendar_tasks(id),
+                name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
+                content BLOB NOT NULL, created_at TEXT NOT NULL
+            );
             """)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(responses)")}
             if "weight" not in columns:
@@ -238,6 +250,16 @@ def clean_text(value, max_len, required=False):
     value = value.strip()
     if len(value) > max_len or (required and not value):
         raise ApiError(400, f"Текст должен содержать от 1 до {max_len} символов")
+    return value
+
+
+def calendar_date(value):
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ApiError(400, "Укажите дату в формате ГГГГ-ММ-ДД")
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ApiError(400, "Некорректная дата") from exc
     return value
 
 
@@ -472,6 +494,106 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         user = self.require(db)
+        calendar = re.fullmatch(r"/api/tasks(?:/(\d+)(?:/files(?:/(\d+))?)?)?", path)
+        if calendar:
+            self.require(db, {"admin", "researcher"})
+            task_id, file_id = (int(value) if value else None for value in calendar.groups())
+            if task_id is None:
+                if method == "GET":
+                    query = parse_qs(urlsplit(self.path).query)
+                    month = query.get("month", [None])[0]
+                    if not isinstance(month, str) or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                        raise ApiError(400, "Укажите месяц в формате ГГГГ-ММ")
+                    rows = db.execute("""SELECT t.id, t.study_id, s.title AS study_title, t.title, t.description,
+                        t.due_date, t.status, t.created_at FROM calendar_tasks t
+                        LEFT JOIN studies s ON s.id = t.study_id
+                        WHERE t.due_date >= ? AND t.due_date < ? ORDER BY t.due_date, t.id""",
+                        (month + "-01", f"{int(month[:4]) + (month[5:] == '12'):04d}-{int(month[5:]) % 12 + 1:02d}-01")).fetchall()
+                    tasks = [dict(row) for row in rows]
+                    for task in tasks:
+                        task["files"] = [dict(row) for row in db.execute(
+                            "SELECT id, name, mime, size FROM calendar_files WHERE task_id = ? ORDER BY id", (task["id"],))]
+                    today = datetime.now().date().isoformat()
+                    self.send_json(200, {"tasks": tasks, "summary": {
+                        "total": len(tasks), "completed": sum(task["status"] == "done" for task in tasks),
+                        "overdue": sum(task["status"] != "done" and task["due_date"] < today for task in tasks),
+                        "files": sum(len(task["files"]) for task in tasks)}})
+                    return
+                if method == "POST":
+                    data = self.read_json()
+                    title = clean_text(data.get("title", ""), 180, True)
+                    description = clean_text(data.get("description", ""), 2000)
+                    due_date = calendar_date(data.get("due_date"))
+                    study_id = data.get("study_id")
+                    if study_id is not None:
+                        if type(study_id) is not int:
+                            raise ApiError(400, "Некорректное исследование")
+                        study_exists(db, study_id)
+                    cursor = db.execute("""INSERT INTO calendar_tasks
+                        (study_id, title, description, due_date, created_by, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)""", (study_id, title, description, due_date, user["id"], now()))
+                    self.send_json(201, {"id": cursor.lastrowid})
+                    return
+            else:
+                task = db.execute("SELECT id FROM calendar_tasks WHERE id = ?", (task_id,)).fetchone()
+                if not task:
+                    raise ApiError(404, "Задача не найдена")
+                if "/files" in path:
+                    if file_id is None and method == "POST":
+                        data = self.read_json()
+                        name = clean_text(data.get("name", ""), 180, True)
+                        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+                        mime = {"pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(ext)
+                        if not mime:
+                            raise ApiError(400, "Поддерживаются только PDF и JPG")
+                        try:
+                            content = base64.b64decode(data.get("content", ""), validate=True)
+                        except (ValueError, TypeError):
+                            raise ApiError(400, "Некорректный файл")
+                        if not content or len(content) > MAX_FILE:
+                            raise ApiError(413, "Размер файла должен быть от 1 байта до 5 МБ")
+                        if (mime == "application/pdf" and not content.startswith(b"%PDF-")) or (
+                            mime == "image/jpeg" and not (content.startswith(b"\xff\xd8\xff") and content.endswith(b"\xff\xd9"))):
+                            raise ApiError(400, "Содержимое файла не соответствует PDF или JPG")
+                        db.execute("""INSERT INTO calendar_files (task_id, name, mime, size, content, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?)""", (task_id, name, mime, len(content), content, now()))
+                        self.send_json(201, {"ok": True})
+                        return
+                    if file_id is not None:
+                        row = db.execute("SELECT name, mime, content FROM calendar_files WHERE id = ? AND task_id = ?", (file_id, task_id)).fetchone()
+                        if not row:
+                            raise ApiError(404, "Файл не найден")
+                        if method == "GET":
+                            self.send_bytes(200, row["content"], row["mime"],
+                                {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(row['name'])}"})
+                            return
+                        if method == "DELETE":
+                            db.execute("DELETE FROM calendar_files WHERE id = ?", (file_id,))
+                            self.send_json(200, {"ok": True})
+                            return
+                elif method == "PATCH":
+                    data = self.read_json()
+                    title = clean_text(data.get("title", ""), 180, True)
+                    description = clean_text(data.get("description", ""), 2000)
+                    due_date = calendar_date(data.get("due_date"))
+                    status = data.get("status")
+                    if status not in ("planned", "done"):
+                        raise ApiError(400, "Некорректный статус задачи")
+                    study_id = data.get("study_id")
+                    if study_id is not None:
+                        if type(study_id) is not int:
+                            raise ApiError(400, "Некорректное исследование")
+                        study_exists(db, study_id)
+                    db.execute("""UPDATE calendar_tasks SET title = ?, description = ?, due_date = ?, status = ?, study_id = ?
+                        WHERE id = ?""", (title, description, due_date, status, study_id, task_id))
+                    self.send_json(200, {"ok": True})
+                    return
+                elif method == "DELETE":
+                    db.execute("DELETE FROM calendar_files WHERE task_id = ?", (task_id,))
+                    db.execute("DELETE FROM calendar_tasks WHERE id = ?", (task_id,))
+                    self.send_json(200, {"ok": True})
+                    return
+            raise ApiError(405, "Действие не поддерживается")
         if path == "/api/users":
             if method == "GET":
                 self.require(db, {"admin"})
@@ -738,6 +860,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if action is None and method == "DELETE":
             self.require(db, {"admin"})
+            db.execute("UPDATE calendar_tasks SET study_id = NULL WHERE study_id = ?", (study_id,))
             for table in ("files", "questionnaires", "responses", "refusals", "weighting", "submissions",
                           "study_messages", "study_quotas", "study_associations", "study_members", "member_quotas",
                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports"):

@@ -215,9 +215,21 @@
     .public-wrap { max-width:760px; margin:40px auto; padding:0 18px 50px; }
     .public-wrap .box { margin-top:22px; }
     .public-wrap .survey-item { background:#f8fcff; }
+    .calendar-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:18px; }
+    .calendar-toolbar strong { min-width:180px; text-align:center; text-transform:capitalize; }
+    .calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:5px; }
+    .calendar-weekday { padding:8px 2px; color:var(--muted); font-size:11px; text-align:center; }
+    .calendar-day { min-height:98px; padding:8px; border:1px solid var(--line); border-radius:9px; background:#fff; text-align:left; color:var(--ink); white-space:normal; }
+    .calendar-day:hover,.calendar-day.selected { border-color:var(--orange); background:#eff8ff; }
+    .calendar-day.today { box-shadow:inset 0 0 0 2px #8ac7ec; }
+    .calendar-day small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; margin-top:5px; }
+    .calendar-day small.done { text-decoration:line-through; color:var(--muted); }
+    .calendar-day small.late { color:#a34442; }
+    .calendar-agenda { margin-top:19px; }
+    .calendar-agenda .file-row { flex-wrap:wrap; }
     @media (max-width:1000px) { .stats { grid-template-columns:repeat(2,1fr); } .detail-layout,.editor-layout { grid-template-columns:1fr; } .assistant-pane { position:static; } }
     @media (max-width:700px) { .shell { display:block; } .sidebar { position:relative; height:auto; padding:17px 16px 12px; } .brand { font-size:21px; } .brand-sub,.nav-label,.sidebar-bottom { display:none; } .sidebar nav { display:flex; gap:4px; margin-top:14px; overflow:auto; } .nav-item { width:auto; flex:none; padding:9px 10px; font-size:11px; } .main { padding:0 16px 50px; } .topbar { min-height:55px; height:auto; padding:9px 0; } .top-meta { display:none; } .page-head { align-items:start; flex-direction:column; margin:29px 0 21px; } .cards,.field-list,.quota-board .quota-list { grid-template-columns:1fr; } .auth-wrap { display:block; } .auth-art { min-height:260px; padding:25px; } .auth-art h1 { margin:30px 0 10px; font-size:35px; } .auth-art p { margin-bottom:10px; font-size:12px; } .auth-art small { display:none; } .auth-form { min-height:430px; } .modal-layer:has(#survey-form) { padding:0; } .modal:has(#survey-form) { width:100%; height:100dvh; max-height:100dvh; border-radius:0; padding:22px; } .survey-choice { min-height:44px; } .sync-status { flex-wrap:wrap; justify-content:flex-end; } }
-    @media (max-width:440px) { .stats { gap:8px; } .stat { min-height:110px; padding:14px; } .stat-number { font-size:30px; } .box { padding:17px; } .stage { font-size:9px; } .form-two,.member-grid,.compound-row,.editor-toolbar { grid-template-columns:1fr; } .modal { padding:19px; } .report-grid { grid-template-columns:1fr; } .report-bar-row { grid-template-columns:minmax(75px,1fr) minmax(60px,1fr) 48px; gap:6px; } }
+    @media (max-width:440px) { .stats { gap:8px; } .stat { min-height:110px; padding:14px; } .stat-number { font-size:30px; } .box { padding:17px; } .stage { font-size:9px; } .form-two,.member-grid,.compound-row,.editor-toolbar { grid-template-columns:1fr; } .modal { padding:19px; } .report-grid { grid-template-columns:1fr; } .report-bar-row { grid-template-columns:minmax(75px,1fr) minmax(60px,1fr) 48px; gap:6px; } .calendar-day { min-height:66px; padding:4px; font-size:11px; } .calendar-day small { font-size:9px; } }
   </style>
 </head>
 <body>
@@ -233,12 +245,14 @@
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
     const isAdmin = () => state.user?.role === 'admin';
     const canManage = () => ['admin','researcher'].includes(state.user?.role) && !state.offline;
-    const allowedTabs = () => isAdmin() ? ['overview','studies','field','focus','editor','team'] : state.user?.role === 'researcher' ? ['studies','focus'] : ['field'];
+    const allowedTabs = () => isAdmin() ? ['overview','studies','calendar','field','focus','editor','team'] : state.user?.role === 'researcher' ? ['studies','calendar','focus'] : ['field'];
     const date = value => value ? new Date(value.length === 10 ? value + 'T12:00:00' : value).toLocaleDateString('ru-RU') : 'Не указан';
     const study = id => state.studies.find(item => item.id === Number(id));
     const focusSessions = new Map();
     const transcriptionJobs = new Set();
     const editorState = {studyId:null, document:'questionnaire', dirty:false, loading:0, history:[], revision:0, hintTimer:null, hintRequest:0, hintBusy:false, lastHintAt:0, lastHintText:''};
+    const todayISO = () => { const day = new Date(); return `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`; };
+    const calendarState = {month:todayISO().slice(0,7), day:todayISO(), tasks:[], summary:null, loading:0};
     let recorder = null, pendingAudio = null;
     window.addEventListener('beforeunload', event => { if (recorder?.state === 'recording' || pendingAudio || editorState.dirty) { event.preventDefault(); event.returnValue = ''; } });
 
@@ -338,8 +352,11 @@
       if (!allowedTabs().includes(state.tab)) state.tab = allowedTabs()[0];
       if (state.user.role === 'interviewer') state.selected = null;
       const active = state.selected != null ? 'studies' : state.tab;
-      const navigation = [['overview','▦','Обзор'],['studies','◫','Исследования'],['field','◉','Полевой опрос'],['focus','◎','Фокус-группы'],['editor','✎','Редактор'],['team','♙','Команда']].filter(([key]) => allowedTabs().includes(key));
+      const navigation = [['overview','▦','Обзор'],['studies','◫','Исследования'],['calendar','▦','Календарь'],['field','◉','Полевой опрос'],['focus','◎','Фокус-группы'],['editor','✎','Редактор'],['team','♙','Команда']].filter(([key]) => allowedTabs().includes(key));
+      const calendarView = state.selected == null && state.tab === 'calendar';
+      if (calendarView) state.tab = 'studies';
       app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand">НИЛ «МЛСИ»</div><div class="brand-sub">Социологическая лаборатория</div><div class="nav-label">Рабочее пространство</div><nav>${navigation.map(([key,icon,label]) => `<button class="nav-item ${active === key ? 'active' : ''}" data-tab="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="user-card"><span class="avatar">${esc(state.user.name.slice(0,1).toUpperCase())}</span><div><strong>${esc(state.user.name)}</strong><small>${roles[state.user.role]}</small></div></div><button class="logout" id="logout">Выйти из аккаунта →</button></div></aside><div class="main"><div class="topbar"><span class="breadcrumb">НИЛ «МЛСИ» <span style="color:#94b2c8">/</span> <b>${state.selected != null ? 'Исследование' : ({overview:'Обзор',studies:'Исследования',field:'Полевой опрос',focus:'Фокус-группы',editor:'Редактор',team:'Команда'})[state.tab]}</b></span><span class="sync-status" id="sync-status"></span></div><main class="page" id="content">${state.selected != null ? renderDetail(study(state.selected)) : ({overview:renderOverview,studies:renderStudies,field:renderField,focus:renderFocus,editor:renderEditor,team:renderTeam})[state.tab]()}</main></div></div>`;
+      if (calendarView) { state.tab = 'calendar'; document.querySelector('.breadcrumb b').textContent = 'Календарь'; document.querySelector('#content').innerHTML = renderCalendar(); }
       if (state.selected == null && state.tab === 'overview' && state.studies.some(s => s.member_quotas?.length)) {
         document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="quota-board"><div class="section-head"><h2>Персональные составные квоты</h2><span>Без весов, Excel и ответов по ссылке</span></div><div class="quota-list">${state.studies.filter(s => s.member_quotas?.length).map(s => `<div class="quota-group"><h3>${esc(s.title)}</h3>${quotaMarkup(s.member_quotas.map(q => ({label:q.label + ' · ' + q.user_name,rows:[q]})))}</div>`).join('')}</div></section>`);
       }
@@ -357,6 +374,7 @@
       }
       if (state.selected == null && state.tab === 'focus' && !state.offline) state.studies.forEach(s => loadFocus(s.id));
       if (state.selected == null && state.tab === 'editor' && !state.offline && state.studies.length) bindEditor();
+      if (calendarView && !state.offline) loadCalendar();
       if (state.selected != null && canManage()) {
         const s = study(state.selected);
          if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(s.id, event.currentTarget); }
@@ -380,6 +398,66 @@
       return heading('Добро пожаловать','Работа в фокусе','Все исследования и полевые данные вашей команды в одном месте.', canManage() ? '<button class="btn" data-action="new-study">+ Новое исследование</button>' : '') + `<div class="stats"><div class="stat"><span class="stat-label">Всего исследований</span><strong class="stat-number">${studies.length}</strong><span class="stat-note">В базе лаборатории</span></div><div class="stat"><span class="stat-label">В работе</span><strong class="stat-number">${active.length}</strong><span class="stat-note">Активные проекты</span></div><div class="stat"><span class="stat-label">Полевой этап</span><strong class="stat-number">${studies.filter(s => s.stage === 'field').length}</strong><span class="stat-note">Сбор данных</span></div><div class="stat"><span class="stat-label">Собрано анкет</span><strong class="stat-number">${studies.reduce((n,s) => n+s.response_count,0)}</strong><span class="stat-note">Ответы респондентов</span></div></div>${canManage() && studies.some(s => s.quotas?.length) ? `<section class="quota-board"><div class="section-head"><h2>Прогресс квот</h2><span>Без весов и отказов</span></div><div class="quota-list">${studies.filter(s => s.quotas?.length).map(s => `<div class="quota-group"><h3>${esc(s.title)}</h3>${quotaMarkup(s.quotas)}</div>`).join('')}</div></section>` : ''}<div class="section-head"><h2>Последние исследования</h2><span>${studies.length} проектов</span></div>${studies.length ? `<div class="cards">${studies.slice(0,4).map(studyCard).join('')}</div>` : empty('Пока нет исследований','Создайте первый проект, чтобы начать планирование.')}`;
     }
     function renderStudies() { return heading('Реестр проектов','Исследования','От идеи и полевого этапа до обработки и результата.',canManage() ? '<button class="btn" data-action="new-study">+ Новое исследование</button>' : '') + (state.studies.length ? `<div class="cards">${state.studies.map(studyCard).join('')}</div>` : empty('Исследований пока нет','Добавьте проект, чтобы вести его этапы, файлы и анкету.')); }
+    function renderCalendar() {
+      return heading('Планирование','Календарь задач','Задачи, сроки и документы лаборатории по датам.',!state.offline ? '<button class="btn" data-action="new-task">+ Добавить задачу</button>' : '') +
+        `<section class="box"><div class="calendar-toolbar"><button class="btn small secondary" data-action="calendar-month" data-step="-1" aria-label="Предыдущий месяц">←</button><strong>${new Date(calendarState.month+'-01T12:00:00').toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</strong><button class="btn small secondary" data-action="calendar-month" data-step="1" aria-label="Следующий месяц">→</button></div><div id="calendar-data">${state.offline ? '<p class="muted">Календарь доступен при подключении к серверу.</p>' : '<p class="muted">Загружаем задачи…</p>'}</div></section>`;
+    }
+    async function loadCalendar() {
+      const month = calendarState.month, request = ++calendarState.loading;
+      try {
+        const result = await api('/tasks?month='+month);
+        if (request !== calendarState.loading || state.tab !== 'calendar' || state.selected != null || !document.querySelector('#calendar-data')) return;
+        calendarState.tasks = result.tasks; calendarState.summary = result.summary;
+        showCalendarData();
+      } catch (error) { const box = document.querySelector('#calendar-data'); if (box && state.tab === 'calendar') box.innerHTML = `<p class="muted">${esc(error.message)}</p>`; }
+    }
+    function showCalendarData() {
+      const box = document.querySelector('#calendar-data'); if (!box) return;
+      const {month,day,tasks,summary} = calendarState;
+      const [year,number] = month.split('-').map(Number), offset = (new Date(year,number-1,1).getDay()+6)%7;
+      const count = new Date(year,number,0).getDate();
+      const cells = Array.from({length:offset},()=>'<span></span>');
+      for (let n=1;n<=count;n++) {
+        const key = `${month}-${String(n).padStart(2,'0')}`, entries = tasks.filter(item => item.due_date === key);
+        cells.push(`<button type="button" class="calendar-day ${key === day ? 'selected' : ''} ${key === todayISO() ? 'today' : ''}" data-action="calendar-day" data-day="${key}" aria-label="${date(key)}: ${entries.length} задач">${n}${entries.slice(0,3).map(item => `<small class="${item.status === 'done' ? 'done' : key < todayISO() ? 'late' : ''}">${esc(item.title)}</small>`).join('')}${entries.length > 3 ? `<small>+${entries.length-3} ещё</small>` : ''}</button>`);
+      }
+      const selected = tasks.filter(item => item.due_date === day);
+      box.innerHTML = `<div class="report-grid">${[['Задач в месяце',summary.total],['Выполнено',summary.completed],['Просрочено',summary.overdue],['Файлов PDF/JPG',summary.files]].map(([label,value]) => `<div class="report-metric"><span class="muted">${label}</span><strong>${value}</strong></div>`).join('')}</div><div class="calendar-grid">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(label => `<span class="calendar-weekday">${label}</span>`).join('')}${cells.join('')}</div><div class="calendar-agenda"><div class="box-title"><h2>${date(day)}</h2><button class="btn small secondary" data-action="new-task" data-day="${day}">+ Задача на этот день</button></div>${selected.length ? selected.map(item => `<div class="file-row"><span class="badge ${item.status === 'done' ? 'completed' : ''}">${item.status === 'done' ? 'Выполнено' : 'В плане'}</span><strong>${esc(item.title)}</strong><small>${item.files.length} файлов${item.study_title ? ' · '+esc(item.study_title) : ''}</small><button class="btn small secondary" data-action="edit-task" data-task="${item.id}">Открыть</button></div>`).join('') : '<p class="muted">Задач на выбранную дату нет.</p>'}</div>`;
+    }
+    function changeCalendarMonth(step) {
+      const [year,month] = calendarState.month.split('-').map(Number), next = new Date(year,month-1+step,1);
+      calendarState.month = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}`;
+      calendarState.day = calendarState.month+'-01'; render();
+    }
+    function editTask(task=null, day=calendarState.day) {
+      const options = state.studies.map(s => `<option value="${s.id}" ${task?.study_id === s.id ? 'selected' : ''}>${esc(s.title)}</option>`).join('');
+      const files = task?.files || [];
+      openModal(task ? 'Задача' : 'Новая задача', `<form id="calendar-task-form" class="form-grid"><label class="field-label">Название *<input name="title" required maxlength="180" value="${esc(task?.title || '')}"></label><label class="field-label">Дата *<input name="due_date" type="date" required value="${esc(task?.due_date || day)}"></label><label class="field-label">Исследование<select name="study_id"><option value="">Без исследования</option>${options}</select></label><label class="field-label">Описание<textarea name="description" maxlength="2000">${esc(task?.description || '')}</textarea></label>${task ? `<label class="field-label">Статус<select name="status"><option value="planned">В плане</option><option value="done" ${task.status === 'done' ? 'selected' : ''}>Выполнено</option></select></label>` : ''}<button class="btn" type="submit">Сохранить</button></form>${task ? `<div class="calendar-agenda"><h3>Документы на дату</h3>${files.map(file => `<div class="file-row"><a href="/api/tasks/${task.id}/files/${file.id}">${esc(file.name)}</a><small>${(file.size/1024).toFixed(0)} КБ</small><button type="button" class="text-button" data-calendar-remove="${file.id}">Удалить</button></div>`).join('') || '<p class="muted">Файлов пока нет.</p>'}<form id="calendar-file-form" class="upload-form"><input name="file" type="file" accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg" required aria-label="PDF или JPG"><button type="submit" class="btn small secondary">Загрузить</button></form><p class="muted">PDF или JPG до 5 МБ. Файл хранится в базе лаборатории.</p><button type="button" class="text-button" id="calendar-task-delete">Удалить задачу</button></div>` : '<p class="muted">Сохраните задачу, затем прикрепите к дате PDF или JPG.</p>'}`);
+      const form = document.querySelector('#calendar-task-form');
+      form.onsubmit = async event => {
+        event.preventDefault(); const data = Object.fromEntries(new FormData(form)); data.study_id = data.study_id ? Number(data.study_id) : null;
+        if (!task) data.status = 'planned';
+        try { await api(task ? `/tasks/${task.id}` : '/tasks',task ? 'PATCH' : 'POST',data); closeModal(); calendarState.month = data.due_date.slice(0,7); calendarState.day = data.due_date; render(); notify('Задача сохранена'); } catch (error) { notify(error.message,true); }
+      };
+      if (!task) return;
+      document.querySelector('#calendar-file-form').onsubmit = async event => {
+        event.preventDefault(); const upload = event.currentTarget, file = upload.elements.file.files[0];
+        if (!file || !/\.(pdf|jpe?g)$/i.test(file.name) || file.size > 5*1024*1024) return notify('Нужен PDF или JPG до 5 МБ',true);
+        const button = upload.querySelector('button'); button.disabled = true;
+        try {
+          const content = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
+          await api(`/tasks/${task.id}/files`,'POST',{name:file.name,content}); await loadCalendar(); editTask(calendarState.tasks.find(item => item.id === task.id)); notify('Файл загружен');
+        } catch (error) { notify(error.message,true); button.disabled = false; }
+      };
+      document.querySelectorAll('[data-calendar-remove]').forEach(button => button.onclick = async () => {
+        if (!confirm('Удалить вложение?')) return;
+        try { await api(`/tasks/${task.id}/files/${button.dataset.calendarRemove}`,'DELETE'); await loadCalendar(); editTask(calendarState.tasks.find(item => item.id === task.id)); } catch (error) { notify(error.message,true); }
+      });
+      document.querySelector('#calendar-task-delete').onclick = async () => {
+        if (!confirm('Удалить задачу и все её файлы?')) return;
+        try { await api(`/tasks/${task.id}`,'DELETE'); closeModal(); await loadCalendar(); notify('Задача удалена'); } catch (error) { notify(error.message,true); }
+      };
+    }
     function renderDetail(s) {
       if (!s) { state.selected = null; return empty('Проект не найден','Вернитесь к списку исследований.'); }
       const stageKeys = Object.keys(stages), current = stageKeys.indexOf(s.stage);
@@ -534,7 +612,7 @@
     async function handleClick(event) {
       const button = event.target.closest('[data-action]'); if (!button) return;
       const { action, id } = button.dataset; const s = study(id);
-      const permitted = isAdmin() || (state.user.role === 'researcher' && ['open','back','new-study','edit-study','questions','edit-quotas','new-focus','open-focus','link-create','link-revoke','stage'].includes(action)) || (state.user.role === 'interviewer' && action === 'survey');
+      const permitted = isAdmin() || (state.user.role === 'researcher' && ['open','back','new-study','edit-study','questions','edit-quotas','new-focus','open-focus','link-create','link-revoke','stage','calendar-month','calendar-day','new-task','edit-task'].includes(action)) || (state.user.role === 'interviewer' && action === 'survey');
       if (!permitted) return notify('Недостаточно прав для этого действия',true);
       if (action === 'open') { state.selected = Number(id); render(); }
       if (action === 'back') { state.selected = null; state.tab = 'studies'; render(); }
@@ -551,9 +629,13 @@
       if (action === 'survey' && s) openSurvey(s);
       if (action === 'stage' && s) { try { await api('/studies/'+s.id,'PATCH',{ title:s.title,description:s.description,goal:s.goal,tasks:s.tasks,due_date:s.due_date,responsible_id:s.responsible_id,stage:button.dataset.stage }); await refresh(); notify('Этап исследования обновлён'); } catch (error) { notify(error.message,true); } }
       if (action === 'delete-study' && s) deleteStudy(s);
+      if (action === 'calendar-month' && !state.offline) changeCalendarMonth(Number(button.dataset.step));
+      if (action === 'calendar-day') { calendarState.day = button.dataset.day; showCalendarData(); }
+      if (action === 'new-task' && !state.offline) editTask(null,button.dataset.day || calendarState.day);
+      if (action === 'edit-task' && !state.offline) { const task = calendarState.tasks.find(item => item.id === Number(button.dataset.task)); if (task) editTask(task); }
     }
     async function deleteStudy(s) {
-      if (!confirm(`Удалить исследование «${s.title}» и все анкеты, файлы, отчёты и фокус-группы? Это действие нельзя отменить.`)) return;
+      if (!confirm(`Удалить исследование «${s.title}» и все анкеты, файлы, отчёты и фокус-группы? Задачи календаря сохранятся без связи с проектом. Это действие нельзя отменить.`)) return;
       try { await api(`/studies/${s.id}`,'DELETE'); state.selected = null; await refresh(); notify('Исследование удалено'); }
       catch (error) { notify(error.message,true); }
     }

@@ -101,6 +101,47 @@ class PlannerTest(unittest.TestCase):
                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports"):
                 self.assertEqual(db.execute(f"SELECT COUNT(*) FROM {table} WHERE study_id = ?", (sid,)).fetchone()[0], 0)
 
+    def test_calendar_tasks_files_summary_and_permissions(self):
+        self.assertEqual(self.request(self.admin, "/tasks?month=2026-09")[0], 401)
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        self.request(self.admin, "/users", "POST", {"name": "Исследователь", "email": "research@test.org",
+            "password": "secure-pass-456", "role": "researcher"})
+        self.request(self.admin, "/users", "POST", {"name": "Интервьюер", "email": "field@test.org",
+            "password": "secure-pass-789", "role": "interviewer"})
+        self.request(self.researcher, "/login", "POST", {"email": "research@test.org", "password": "secure-pass-456"})
+        self.request(self.interviewer, "/login", "POST", {"email": "field@test.org", "password": "secure-pass-789"})
+        sid = self.request(self.admin, "/studies", "POST", {"title": "Проект", "description": ""})[1]["id"]
+        payload = {"title": "Подготовить материалы", "description": "Отправить в отдел", "due_date": "2020-02-29", "study_id": sid}
+        self.assertEqual(self.request(self.interviewer, "/tasks?month=2020-02")[0], 403)
+        self.assertEqual(self.request(self.interviewer, "/tasks", "POST", payload)[0], 403)
+        self.assertEqual(self.request(self.admin, "/tasks", "POST", {**payload, "due_date": "2020-02-30"})[0], 400)
+        self.assertEqual(self.request(self.admin, "/tasks", "POST", {**payload, "study_id": 999})[0], 404)
+        tid = self.request(self.researcher, "/tasks", "POST", payload)[1]["id"]
+        pdf = b"%PDF-1.4\n%%EOF"
+        jpeg = b"\xff\xd8\xff\xe0picture\xff\xd9"
+        path = f"/tasks/{tid}/files"
+        self.assertEqual(self.request(self.researcher, path, "POST", {"name": "wrong.pdf", "content": base64.b64encode(b"abc").decode()})[0], 400)
+        self.assertEqual(self.request(self.admin, path, "POST", {"name": "test.png", "content": base64.b64encode(jpeg).decode()})[0], 400)
+        self.assertEqual(self.request(self.admin, path, "POST", {"name": "plan.pdf", "content": base64.b64encode(pdf).decode()})[0], 201)
+        self.assertEqual(self.request(self.researcher, path, "POST", {"name": "photo.jpg", "content": base64.b64encode(jpeg).decode()})[0], 201)
+        status, result = self.request(self.researcher, "/tasks?month=2020-02")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["summary"], {"total": 1, "completed": 0, "overdue": 1, "files": 2})
+        self.assertEqual(result["tasks"][0]["study_title"], "Проект")
+        fid = result["tasks"][0]["files"][0]["id"]
+        self.assertEqual(self.request(self.interviewer, f"{path}/{fid}")[0], 403)
+        self.assertEqual(self.request(self.admin, f"{path}/{fid}", binary=True), (200, pdf))
+        self.assertEqual(self.request(self.researcher, f"/tasks/{tid}", "PATCH", {**payload, "status": "done"})[0], 200)
+        self.assertEqual(self.request(self.admin, "/tasks?month=2020-02")[1]["summary"]["completed"], 1)
+        self.assertEqual(self.request(self.admin, f"/tasks/{tid}", "PATCH", {**payload, "status": "invalid"})[0], 400)
+        self.assertEqual(self.request(self.admin, f"{path}/{fid}", "DELETE")[0], 200)
+        self.assertEqual(self.request(self.admin, f"/studies/{sid}", "DELETE")[0], 200)
+        self.assertIsNone(self.request(self.admin, "/tasks?month=2020-02")[1]["tasks"][0]["study_id"])
+        self.assertEqual(self.request(self.admin, f"/tasks/{tid}", "DELETE")[0], 200)
+        self.assertEqual(self.request(self.admin, "/tasks?month=2020-02")[1]["summary"]["files"], 0)
+        with closing(sqlite3.connect(self.db_path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM calendar_files").fetchone()[0], 0)
+
     def test_project_survey_permissions_and_export(self):
         with self.admin.open(self.base + "/") as response:
             self.assertIn("НИЛ «МЛСИ»", response.read().decode("utf-8"))
