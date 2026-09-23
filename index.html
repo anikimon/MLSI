@@ -385,7 +385,7 @@
       if (calendarView && !state.offline) loadCalendar();
       if (state.selected != null && canManage()) {
         const s = study(state.selected);
-         if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section><section class="box report-section"><div class="box-title"><h2>Презентация по записке</h2></div><p class="muted">Сначала сформируйте аналитическую записку. Опишите желаемые акценты, задайте число слайдов и цвета; после генерации редактируйте текст и перетаскивайте блоки мышью или касанием. Сохраните правки перед скачиванием PPTX.</p><form id="presentation-form" class="form-grid"><div><label class="field-label" for="presentation-prompt">Пожелания к презентации</label><textarea id="presentation-prompt" maxlength="2000" placeholder="Например: акцентируй выводы по вопросам и ограничения исследования"></textarea></div><div class="presentation-fields"><div><label class="field-label" for="presentation-count">Слайдов (3–20)</label><input id="presentation-count" type="number" min="3" max="20" value="6" required></div><div><label class="field-label" for="presentation-background">Фон</label><input id="presentation-background" type="color" value="#ffffff"></div><div><label class="field-label" for="presentation-text">Текст</label><input id="presentation-text" type="color" value="#193a54"></div><div><label class="field-label" for="presentation-accent">Акцент</label><input id="presentation-accent" type="color" value="#14527c"></div></div><button class="btn small" type="submit">Сформировать презентацию с ИИ</button></form><div id="presentation-content" aria-live="polite">Загружаем презентацию…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); loadPresentation(s.id); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(s.id, event.currentTarget); document.querySelector('#presentation-form').onsubmit = event => generatePresentation(event,s.id); }
+         if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section><section class="box report-section"><div class="box-title"><h2>Презентация по записке</h2></div><p class="muted">Сначала сформируйте аналитическую записку. Опишите желаемые акценты, задайте число слайдов и цвета; после генерации редактируйте текст и перетаскивайте блоки мышью или касанием. Сохраните правки перед скачиванием PPTX.</p><div class="slide-tools"><label class="btn small secondary" style="cursor:pointer">Добавить PPTX-образец <input id="presentation-template" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden></label><span id="presentation-template-status" class="muted">Проверяем образец…</span></div><p class="muted">Образец (до 5 МБ) задаёт шрифты, цвета, фон и расположение текста; картинки, анимация и текст образца не копируются. Загрузите его до генерации.</p><form id="presentation-form" class="form-grid"><div><label class="field-label" for="presentation-prompt">Пожелания к презентации</label><textarea id="presentation-prompt" maxlength="2000" placeholder="Например: акцентируй выводы по вопросам и ограничения исследования"></textarea></div><div class="presentation-fields"><div><label class="field-label" for="presentation-count">Слайдов (3–20)</label><input id="presentation-count" type="number" min="3" max="20" value="6" required></div><div><label class="field-label" for="presentation-background">Фон</label><input id="presentation-background" type="color" value="#ffffff"></div><div><label class="field-label" for="presentation-text">Текст</label><input id="presentation-text" type="color" value="#193a54"></div><div><label class="field-label" for="presentation-accent">Акцент</label><input id="presentation-accent" type="color" value="#14527c"></div></div><button class="btn small" type="submit">Сформировать презентацию с ИИ</button></form><div id="presentation-content" aria-live="polite">Загружаем презентацию…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); loadPresentation(s.id).then(() => loadPresentationTemplate(s.id)); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(s.id, event.currentTarget); document.querySelector('#presentation-form').onsubmit = event => generatePresentation(event,s.id); document.querySelector('#presentation-template').onchange = event => uploadPresentationTemplate(event,s.id); }
       }
       document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => { if (editorState.dirty && !confirm('Несохранённый текст редактора будет потерян. Продолжить?')) return; editorState.dirty = false; state.tab = button.dataset.tab; state.selected = null; render(); });
       document.querySelector('#logout').onclick = async () => { try { if (!state.offline) await api('/logout','POST',{}); await store('cache','readwrite', items => items.delete('current')); clearTimeout(editorState.hintTimer); Object.assign(editorState,{dirty:false,history:[],hintRequest:editorState.hintRequest+1}); state.user = null; state.selected = null; state.tab = 'overview'; renderAuth(false); } catch (error) { notify(error.message,true); } };
@@ -964,6 +964,34 @@
       finally { if (button.isConnected) { button.disabled = false; button.textContent = 'Сформировать с ИИ'; } }
     }
     let presentationDeck = null;
+    async function loadPresentationTemplate(studyId, applyColors=false) {
+      const status = document.querySelector('#presentation-template-status');
+      if (!status) return;
+      try {
+        const {template} = await api(`/studies/${studyId}/presentation-template`);
+        if (!status.isConnected || state.selected !== studyId) return;
+        status.innerHTML = template ? `Образец: <strong>${esc(template.name)}</strong> <button type="button" class="text-button" id="remove-presentation-template">Удалить образец</button>` : 'Без образца: стандартное оформление';
+        if (template) {
+          if (applyColors || !presentationDeck) for (const key of ['background','text','accent']) document.querySelector(`#presentation-${key}`).value = template.colors[key];
+          status.querySelector('button').onclick = async () => {
+            try { await api(`/studies/${studyId}/presentation-template`,'DELETE',{}); await loadPresentationTemplate(studyId); notify('Образец удалён'); }
+            catch (error) { notify(error.message,true); }
+          };
+        }
+      } catch (error) { if (status.isConnected) status.textContent = `Не удалось загрузить образец: ${error.message}`; }
+    }
+    async function uploadPresentationTemplate(event,studyId) {
+      const input = event.currentTarget, file = input.files[0];
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.pptx') || file.size > 5*1024*1024) { notify('Нужен PPTX размером до 5 МБ',true); input.value = ''; return; }
+      input.disabled = true;
+      try {
+        const content = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
+        await api(`/studies/${studyId}/presentation-template`,'POST',{name:file.name,content});
+        await loadPresentationTemplate(studyId,true); notify('Оформление образца сохранено. Сформируйте презентацию заново.');
+      } catch (error) { notify(error.message,true); }
+      finally { input.disabled = false; input.value = ''; }
+    }
     async function loadPresentation(studyId) {
       const container = document.querySelector('#presentation-content');
       if (!container) return;
@@ -1001,15 +1029,15 @@
       const select = container.querySelector('#slide-select'), stage = container.querySelector('#slide-stage'), editor = container.querySelector('#slide-editor');
       let selected = 0;
       const show = () => {
-        const colors = presentationDeck.colors, elements = presentationDeck.slides[Number(select.value)].elements;
+        const colors = presentationDeck.colors, slide = presentationDeck.slides[Number(select.value)], elements = slide.elements;
         selected = Math.min(selected,elements.length-1);
-        stage.style.backgroundColor = colors.background;
+        stage.style.backgroundColor = slide.background || colors.background;
         stage.innerHTML = '';
         elements.forEach((element,i) => {
           const node = document.createElement('div');
           node.className = `slide-element ${element.kind}${i === selected ? ' selected' : ''}`;
           node.textContent = element.text;
-          Object.assign(node.style,{left:`${element.x}%`,top:`${element.y}%`,width:`${element.w}%`,height:`${element.h}%`,color:element.kind === 'title' ? colors.accent : colors.text});
+          Object.assign(node.style,{left:`${element.x}%`,top:`${element.y}%`,width:`${element.w}%`,height:`${element.h}%`,color:element.style?.color || (element.kind === 'title' ? colors.accent : colors.text),fontFamily:element.style?.font || 'Aptos',fontWeight:element.style ? (element.style.bold ? '700' : '400') : '',fontSize:element.style ? `${element.style.size * stage.clientHeight / 405}px` : ''});
           node.onpointerdown = event => {
             if (event.button !== 0) return;
             selected = i; showEditor();

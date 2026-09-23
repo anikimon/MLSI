@@ -24,7 +24,7 @@ from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
 from reports import analytical_pdf_bytes, analytical_snapshot, build_member_quotas, build_quotas, build_report, parse_weight, pdf_bytes, read_excel
-from presentations import deck_from_outline, pptx_bytes, validate_colors, validate_deck
+from presentations import deck_from_outline, extract_template_style, pptx_bytes, validate_colors, validate_deck
 
 
 ROOT = Path(__file__).resolve().parent
@@ -180,6 +180,10 @@ def init_db(path):
             CREATE TABLE IF NOT EXISTS presentations (
                 study_id INTEGER PRIMARY KEY REFERENCES studies(id),
                 deck TEXT NOT NULL, report_digest TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS presentation_templates (
+                study_id INTEGER PRIMARY KEY REFERENCES studies(id),
+                name TEXT NOT NULL, style TEXT NOT NULL, updated_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS demo_study (
                 id INTEGER PRIMARY KEY CHECK(id = 1), study_id INTEGER NOT NULL UNIQUE REFERENCES studies(id)
@@ -722,7 +726,7 @@ class Handler(BaseHTTPRequestHandler):
             answer = deepseek_answer(payload, key)
             self.send_json(200, {"answer": answer[:10000]})
             return
-        match = re.fullmatch(r"/api/studies/(\d+)(?:/(files|questionnaire|responses.csv|responses|refusals|weighting|quotas|members|member-quotas|survey-link|focus|messages|associations|import|report|report.pdf|analytical-report|analytical-report.pdf|presentation|presentation.pptx)(?:/(\d+)(?:/(audio|transcribe|transcript|guide))?)?)?", path)
+        match = re.fullmatch(r"/api/studies/(\d+)(?:/(files|questionnaire|responses.csv|responses|refusals|weighting|quotas|members|member-quotas|survey-link|focus|messages|associations|import|report|report.pdf|analytical-report|analytical-report.pdf|presentation|presentation.pptx|presentation-template)(?:/(\d+)(?:/(audio|transcribe|transcript|guide))?)?)?", path)
         if not match:
             raise ApiError(404, "Адрес не найден")
         study_id, action, file_id, subaction = int(match[1]), match[2], match[3], match[4]
@@ -881,7 +885,7 @@ class Handler(BaseHTTPRequestHandler):
             db.execute("UPDATE calendar_tasks SET study_id = NULL WHERE study_id = ?", (study_id,))
             for table in ("files", "questionnaires", "responses", "refusals", "weighting", "submissions",
                           "study_messages", "study_quotas", "study_associations", "study_members", "member_quotas",
-                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports", "presentations"):
+                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports", "presentations", "presentation_templates"):
                 db.execute(f"DELETE FROM {table} WHERE study_id = ?", (study_id,))
             db.execute("DELETE FROM studies WHERE id = ?", (study_id,))
             self.send_json(200, {"ok": True})
@@ -1171,6 +1175,34 @@ class Handler(BaseHTTPRequestHandler):
                         raise ApiError(500, str(exc)) from exc
                     self.send_bytes(200, content, "application/pdf", {"Content-Disposition": f"attachment; filename=study-{study_id}-analytical-report.pdf"})
                 return
+        if action == "presentation-template":
+            self.require(db, {"admin", "researcher"})
+            if method == "POST":
+                data = self.read_json()
+                name = clean_text(data.get("name", ""), 180, True)
+                if not name.lower().endswith(".pptx"):
+                    raise ApiError(400, "Загрузите файл .pptx")
+                try:
+                    content = base64.b64decode(data.get("content", ""), validate=True)
+                except (ValueError, TypeError):
+                    raise ApiError(400, "Некорректный файл образца")
+                try:
+                    style = extract_template_style(content)
+                except ValueError as exc:
+                    raise ApiError(400, str(exc)) from exc
+                db.execute("""INSERT INTO presentation_templates (study_id, name, style, updated_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(study_id) DO UPDATE SET name=excluded.name, style=excluded.style,
+                    updated_at=excluded.updated_at""", (study_id, name, json.dumps(style, ensure_ascii=False), now()))
+                self.send_json(200, {"template": {"name": name, "colors": style["colors"]}})
+                return
+            if method == "GET":
+                row = db.execute("SELECT name, style FROM presentation_templates WHERE study_id = ?", (study_id,)).fetchone()
+                self.send_json(200, {"template": {"name": row["name"], "colors": json.loads(row["style"])["colors"]} if row else None})
+                return
+            if method == "DELETE":
+                db.execute("DELETE FROM presentation_templates WHERE study_id = ?", (study_id,))
+                self.send_json(200, {"ok": True})
+                return
         if action in {"presentation", "presentation.pptx"}:
             user = self.require(db, {"admin", "researcher"})
             report = db.execute("SELECT digest, content, snapshot FROM analytical_reports WHERE study_id = ?", (study_id,)).fetchone()
@@ -1210,7 +1242,9 @@ class Handler(BaseHTTPRequestHandler):
                                             "snapshot": json.loads(report["snapshot"]), "wishes": prompt}, ensure_ascii=False)}]}
                 answer = deepseek_answer(payload, key, timeout=120, max_bytes=131072)
                 try:
-                    deck = deck_from_outline(json.loads(answer), count, colors)
+                    template_row = db.execute("SELECT style FROM presentation_templates WHERE study_id = ?", (study_id,)).fetchone()
+                    template = json.loads(template_row["style"]) if template_row else None
+                    deck = deck_from_outline(json.loads(answer), count, colors, template)
                 except (ValueError, TypeError) as exc:
                     raise ApiError(502, "ИИ вернул некорректную структуру презентации. Повторите запрос") from exc
                 db.execute("""INSERT INTO presentations (study_id, deck, report_digest, updated_at) VALUES (?, ?, ?, ?)

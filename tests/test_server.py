@@ -16,6 +16,8 @@ from unittest.mock import patch
 
 from openpyxl import Workbook
 from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.util import Inches, Pt
 
 from reports import analytical_pdf_bytes
 from server import create_server, init_db
@@ -132,7 +134,7 @@ class PlannerTest(unittest.TestCase):
         with closing(sqlite3.connect(self.db_path)) as db:
             for table in ("files", "questionnaires", "responses", "refusals", "weighting", "submissions",
                           "study_messages", "study_quotas", "study_associations", "study_members", "member_quotas",
-                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports", "presentations"):
+                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports", "presentations", "presentation_templates"):
                 self.assertEqual(db.execute(f"SELECT COUNT(*) FROM {table} WHERE study_id = ?", (sid,)).fetchone()[0], 0)
 
     def test_calendar_tasks_files_summary_and_permissions(self):
@@ -688,6 +690,87 @@ class PlannerTest(unittest.TestCase):
         with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value="Новый текст записки"):
             self.assertEqual(self.request(self.admin, f"/studies/{sid}/analytical-report", "POST", {})[0], 200)
         self.assertTrue(self.request(self.admin, path)[1]["stale"])
+
+    def test_pptx_template_applies_fonts_background_and_layout_without_copying_text(self):
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        self.request(self.admin, "/users", "POST", {"name": "Интервьюер", "email": "field@test.org", "password": "secure-pass-456", "role": "interviewer"})
+        self.request(self.interviewer, "/login", "POST", {"email": "field@test.org", "password": "secure-pass-456"})
+        sid = self.request(self.admin, "/studies", "POST", {"title": "Образец"})[1]["id"]
+        path = f"/studies/{sid}/presentation-template"
+        self.assertEqual(self.request(self.admin, path)[1]["template"], None)
+        self.assertEqual(self.request(self.interviewer, path)[0], 403)
+        self.assertEqual(self.request(self.admin, path, "POST", {"name": "ref.pptx", "content": "@@@"})[0], 400)
+        self.assertEqual(self.request(self.admin, path, "POST", {"name": "ref.pptx", "content": base64.b64encode(b"broken").decode()})[0], 400)
+        sample = Presentation()
+        sample.slide_width, sample.slide_height = Inches(13.333), Inches(7.5)
+        cover = sample.slides.add_slide(sample.slide_layouts[6])
+        cover.background.fill.solid()
+        cover.background.fill.fore_color.rgb = RGBColor(32, 32, 64)
+        shape = cover.shapes.add_textbox(Inches(2), Inches(1), Inches(9), Inches(1.5))
+        run = shape.text_frame.paragraphs[0].add_run()
+        run.text = "Не копировать содержимое образца"
+        run.font.name, run.font.size = "Georgia", Pt(34)
+        run.font.color.rgb = RGBColor(255, 204, 0)
+        content_slide = sample.slides.add_slide(sample.slide_layouts[6])
+        content_slide.background.fill.solid()
+        content_slide.background.fill.fore_color.rgb = RGBColor(242, 243, 244)
+        heading = content_slide.shapes.add_textbox(Inches(1.4), Inches(.7), Inches(10), Inches(1))
+        heading_run = heading.text_frame.paragraphs[0].add_run()
+        heading_run.text = "Заголовок образца"
+        heading_run.font.name, heading_run.font.size = "Georgia", Pt(31)
+        heading_run.font.bold = True
+        heading_run.font.color.rgb = RGBColor(96, 32, 64)
+        body = content_slide.shapes.add_textbox(Inches(1.5), Inches(2), Inches(9), Inches(4))
+        body_run = body.text_frame.paragraphs[0].add_run()
+        body_run.text = "Приватный текст образца"
+        body_run.font.name, body_run.font.size = "Times New Roman", Pt(19)
+        body_run.font.color.rgb = RGBColor(32, 64, 96)
+        buffer = io.BytesIO()
+        sample.save(buffer)
+        upload = {"name": "style.pptx", "content": base64.b64encode(buffer.getvalue()).decode()}
+        self.assertEqual(self.request(self.interviewer, path, "POST", upload)[0], 403)
+        self.assertEqual(self.request(self.admin, path, "POST", upload)[0], 200)
+        self.assertEqual(self.request(self.admin, path)[1]["template"]["colors"]["background"], "#f2f3f4")
+        with closing(sqlite3.connect(self.db_path)) as db:
+            style = json.loads(db.execute("SELECT style FROM presentation_templates WHERE study_id = ?", (sid,)).fetchone()[0])
+        self.assertNotIn("Приватный текст", json.dumps(style, ensure_ascii=False))
+        self.assertEqual(style["content"]["body"]["font"], "Times New Roman")
+        self.assertEqual(style["cover"]["background"], "#202040")
+        self.request(self.admin, f"/studies/{sid}/questionnaire", "POST", {"questions": [{"type": "single", "label": "Выбор", "options": ["Да", "Нет"]}]})
+        for _ in range(10):
+            self.request(self.admin, f"/studies/{sid}/responses", "POST", {"answers": {"q1": "Да"}})
+        with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value="Итоги по выбору"):
+            self.assertEqual(self.request(self.admin, f"/studies/{sid}/analytical-report", "POST", {})[0], 200)
+        outline = json.dumps({"slides": [{"title": f"Тест {i}", "bullets": ["Итог"]} for i in range(3)]})
+        with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value=outline) as ai:
+            status, result = self.request(self.admin, f"/studies/{sid}/presentation", "POST", {
+                "slide_count": 3, "prompt": "Кратко", "colors": style["colors"]})
+            self.assertEqual(status, 200)
+            self.assertNotIn("Приватный текст образца", json.dumps(ai.call_args.args[0], ensure_ascii=False))
+        deck = result["presentation"]
+        self.assertEqual(deck["slides"][0]["elements"][0]["style"]["font"], "Georgia")
+        self.assertEqual(deck["slides"][0]["elements"][0]["style"]["color"], "#ffcc00")
+        self.assertEqual(deck["slides"][0]["background"], "#202040")
+        self.assertEqual(deck["slides"][1]["elements"][1]["style"]["size"], 19)
+        self.assertGreater(deck["slides"][0]["elements"][0]["x"], 10)
+        slides = Presentation(io.BytesIO(self.request(self.admin, f"/studies/{sid}/presentation.pptx", binary=True)[1])).slides
+        self.assertEqual(slides[0].background.fill.fore_color.rgb, RGBColor(32, 32, 64))
+        self.assertEqual(slides[0].shapes[0].text_frame.paragraphs[0].runs[0].font.name, "Georgia")
+        self.assertEqual(slides[0].shapes[0].text_frame.paragraphs[0].runs[0].font.color.rgb, RGBColor(255, 204, 0))
+        self.assertEqual(slides[1].shapes[1].text_frame.paragraphs[0].runs[0].font.name, "Times New Roman")
+        self.assertNotIn("образца", " ".join(shape.text for slide in slides for shape in slide.shapes if shape.has_text_frame))
+        deck["slides"][1]["elements"][1]["text"] = "Изменённый текст"
+        self.assertEqual(self.request(self.admin, f"/studies/{sid}/presentation", "PUT", deck)[0], 200)
+        saved = self.request(self.admin, f"/studies/{sid}/presentation")[1]["presentation"]
+        self.assertEqual(saved["slides"][1]["elements"][1]["style"]["font"], "Times New Roman")
+        self.assertEqual(self.request(self.admin, path, "POST", {"name": "bad.pptx", "content": base64.b64encode(b"bad").decode()})[0], 400)
+        self.assertEqual(self.request(self.admin, path)[1]["template"]["name"], "style.pptx")
+        self.assertEqual(self.request(self.admin, path, "DELETE", {})[0], 200)
+        self.assertIsNone(self.request(self.admin, path)[1]["template"])
+        self.assertEqual(self.request(self.admin, path, "POST", upload)[0], 200)
+        self.assertEqual(self.request(self.admin, f"/studies/{sid}", "DELETE", {})[0], 200)
+        with closing(sqlite3.connect(self.db_path)) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM presentation_templates WHERE study_id = ?", (sid,)).fetchone()[0], 0)
 
 
 if __name__ == "__main__":
