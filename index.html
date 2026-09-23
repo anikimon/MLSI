@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#14527c">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>НИЛ «МЛСИ» | Планировщик исследований</title>
+  <style>
+    :root { --ink:#193a54; --muted:#668095; --paper:#f4faff; --white:#fff; --line:#dbeaf4; --plum:#14527c; --plum-light:#1b6899; --orange:#096ba7; --orange-pale:#eaf6ff; --green:#27789e; --blue:#357db4; --shadow:0 18px 50px #163f6210; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    button,input,select,textarea { font:inherit; }
+    button { cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    a { color:inherit; text-decoration:none; }
+    .shell { display:grid; grid-template-columns:252px minmax(0,1fr); min-height:100vh; }
+    .sidebar { position:sticky; top:0; height:100vh; display:flex; flex-direction:column; padding:30px 18px 20px; background:var(--plum); color:#fff; }
+    .brand { padding:0 14px; font-size:21px; font-weight:800; letter-spacing:-.04em; white-space:nowrap; }
+    .brand-sub { padding:9px 15px 0; color:#b5d5e9; font-size:10px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; }
+    .nav-label { margin:52px 15px 14px; color:#a9cfe7; font-size:10px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+    .nav-item { width:100%; display:flex; align-items:center; gap:12px; padding:13px 15px; border:0; border-radius:10px; color:#d0e7f6; background:transparent; text-align:left; font-size:14px; font-weight:600; }
+    .nav-item:hover,.nav-item.active { color:#fff; background:#ffffff16; }
+    .nav-item.active { box-shadow:inset 3px 0 var(--orange); }
+    .nav-icon { width:19px; font-size:18px; line-height:1; text-align:center; }
+    .sidebar-bottom { margin-top:auto; padding:16px 12px 0; border-top:1px solid #ffffff22; }
+    .user-card { display:flex; align-items:center; gap:10px; }
+    .avatar { display:grid; place-items:center; flex:none; width:36px; height:36px; border-radius:10px; color:#fff; background:#3989b8; font-weight:800; }
+    .user-card strong { display:block; max-width:145px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+    .user-card small { color:#b5d5e9; font-size:11px; }
+    .logout { margin:14px 0 0; padding:5px 0; border:0; color:#b5d5e9; background:none; font-size:12px; }
+    .logout:hover { color:#fff; }
+    .main { min-width:0; padding:0 clamp(22px,4vw,72px) 80px; }
+    .topbar { height:80px; display:flex; align-items:center; justify-content:space-between; gap:14px; border-bottom:1px solid var(--line); }
+    .breadcrumb { color:var(--muted); font-size:13px; }
+    .breadcrumb b { color:var(--ink); }
+    .top-meta { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:12px; }
+    .top-dot { width:8px; height:8px; border-radius:50%; background:#4fa6d5; box-shadow:0 0 0 4px #4fa6d51d; }
+    .page { max-width:1180px; margin:0 auto; }
+    .page-head { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; margin:38px 0 27px; }
+    .eyebrow { margin:0 0 7px; color:var(--orange); font-size:11px; font-weight:800; letter-spacing:.17em; text-transform:uppercase; }
+    h1,h2,h3,p { margin-top:0; }
+    h1 { margin-bottom:7px; font-size:clamp(29px,3.3vw,43px); font-weight:700; letter-spacing:-.045em; line-height:1.12; }
+    h2 { font-size:20px; letter-spacing:-.035em; }
+    h3 { font-size:15px; }
+    .lead { margin:0; color:var(--muted); font-size:13px; line-height:1.6; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:9px 15px; border:1px solid transparent; border-radius:9px; background:var(--plum); color:#fff; font-size:12px; font-weight:700; white-space:nowrap; }
+    .btn:hover { background:var(--plum-light); }
+    .btn.secondary { border-color:var(--line); background:#fff; color:var(--ink); }
+    .btn.secondary:hover { background:#edf7ff; border-color:#a9d0e9; }
+    .btn.orange { background:var(--orange); }
+    .btn.orange:hover { background:#075684; }
+    .btn.small { min-height:33px; padding:7px 11px; font-size:11px; }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:33px; }
+    .stat { min-height:125px; padding:21px; border:1px solid var(--line); border-radius:13px; background:var(--white); box-shadow:var(--shadow); }
+    .stat-label { color:var(--muted); font-size:11px; font-weight:600; }
+    .stat-number { display:block; margin:13px 0 4px; font-size:37px; font-weight:750; line-height:1; }
+    .stat-note { color:#8aa3b6; font-size:10px; }
+    .section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:28px 0 16px; }
+    .section-head h2 { margin:0; }
+    .section-head span { color:var(--muted); font-size:12px; }
+    .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px; }
+    .study-card { position:relative; display:block; width:100%; min-height:195px; padding:22px; border:1px solid var(--line); border-radius:13px; background:#fff; box-shadow:var(--shadow); text-align:left; transition:transform .16s,border-color .16s; }
+    .study-card:hover { transform:translateY(-2px); border-color:#9bc9e7; }
+    .card-top { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:22px; }
+    .card-id { color:#829bac; font-size:11px; font-weight:700; letter-spacing:.07em; }
+    .badge { display:inline-block; padding:6px 9px; border-radius:6px; background:#eaf3ff; color:#2c679d; font-size:10px; font-weight:750; white-space:nowrap; }
+    .badge.field { color:#086e9d; background:#e2f7ff; }
+    .badge.processing { color:#2860a0; background:#e9f1fc; }
+    .badge.completed { color:#27789e; background:#e7f7fc; }
+    .study-card h3 { margin:0 0 9px; font-size:17px; line-height:1.35; }
+    .study-card p { height:35px; overflow:hidden; margin:0 0 16px; color:var(--muted); font-size:12px; line-height:1.5; }
+    .card-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-top:14px; border-top:1px solid var(--line); color:#718da0; font-size:11px; }
+    .empty { padding:46px 30px; border:1px dashed #bad6e8; border-radius:13px; background:#fff; color:var(--muted); text-align:center; }
+    .empty strong { display:block; margin-bottom:8px; color:var(--ink); font-size:16px; }
+    .back { padding:0; border:0; background:none; color:var(--muted); font-size:12px; }
+    .back:hover { color:var(--orange); }
+    .detail-layout { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(270px,.9fr); gap:18px; align-items:start; }
+    .box { padding:24px; border:1px solid var(--line); border-radius:13px; background:#fff; box-shadow:var(--shadow); }
+    .box + .box { margin-top:18px; }
+    .box-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
+    .box-title h2 { margin:0; font-size:17px; }
+    .description { color:#506e84; font-size:13px; line-height:1.7; white-space:pre-wrap; }
+    .info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+    .info-label { margin-bottom:5px; color:#829bad; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+    .info-value { font-size:13px; font-weight:650; }
+    .stage-list { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; margin:16px 0 10px; }
+    .stage { padding:12px 5px; border:1px solid var(--line); border-radius:7px; background:#f8fcff; color:#8aa3b5; font-size:10px; font-weight:700; text-align:center; }
+    .stage.current { border-color:#83bde2; background:#e5f4ff; color:#096ba7; }
+    .stage.past { background:#ebf7ff; color:#3980aa; }
+    button.stage:hover:not(:disabled) { border-color:var(--orange); }
+    .file-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+    .file-row:last-child { border-bottom:0; }
+    .file-icon { display:grid; place-items:center; width:33px; height:33px; border-radius:8px; background:#eaf6ff; color:#267db2; font-size:15px; }
+    .file-row a { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); font-size:12px; font-weight:650; }
+    .file-row a:hover { color:var(--orange); }
+    .file-row small { margin-left:auto; color:#809bad; white-space:nowrap; font-size:10px; }
+    .muted { color:var(--muted); font-size:12px; line-height:1.6; }
+    .upload-form { display:flex; gap:8px; flex-wrap:wrap; margin-top:17px; }
+    .upload-form input[type=file] { flex:1; min-width:140px; max-width:100%; font-size:11px; }
+    .upload-form select { min-height:37px; width:auto; }
+    .field-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .field-card { padding:19px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    .field-card h3 { margin:10px 0 6px; font-size:15px; }
+    .field-card p { margin-bottom:14px; color:var(--muted); font-size:12px; }
+    .team-list { display:grid; gap:10px; }
+    .team-row { display:flex; align-items:center; gap:13px; padding:14px 17px; border:1px solid var(--line); border-radius:11px; background:#fff; }
+    .team-row .avatar { background:#e7f4fd; color:#236b99; }
+    .team-row strong { font-size:13px; }
+    .team-row small { display:block; margin-top:2px; color:var(--muted); font-size:11px; }
+    .team-row .badge { margin-left:auto; }
+    .modal-layer { position:fixed; inset:0; z-index:20; display:none; align-items:center; justify-content:center; padding:16px; background:#0f314db0; }
+    .modal-layer.show { display:flex; }
+    .modal { width:min(620px,100%); max-height:min(90vh,900px); overflow:auto; padding:27px; border-radius:16px; background:#fff; box-shadow:0 25px 100px #123b6055; }
+    .modal.wide { width:min(760px,100%); }
+    .modal-head { display:flex; justify-content:space-between; align-items:start; gap:16px; margin-bottom:20px; }
+    .modal-head h2 { margin:0; font-size:26px; font-weight:700; }
+    .close { border:0; background:none; color:var(--muted); font-size:23px; line-height:1; }
+    .form-grid { display:grid; gap:15px; }
+    .form-two { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    label.field-label { display:block; margin-bottom:6px; color:#4e6a80; font-size:11px; font-weight:700; }
+    input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select { width:100%; min-height:40px; padding:10px 11px; border:1px solid #cbdfea; border-radius:8px; outline:none; background:#fff; color:var(--ink); font-size:13px; }
+    textarea { min-height:85px; resize:vertical; }
+    input:focus,textarea:focus,select:focus { border-color:#62addb !important; box-shadow:0 0 0 3px #62addb24; }
+    .actions { display:flex; justify-content:flex-end; gap:9px; margin-top:21px; }
+    .question-edit { margin-bottom:10px; padding:15px; border:1px solid var(--line); border-radius:10px; background:#f7fbff; }
+    .question-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:11px; }
+    .question-top strong { color:var(--orange); font-size:11px; }
+    .text-button { border:0; background:none; color:var(--orange); font-size:11px; font-weight:700; }
+    .question-edit .form-two { margin-bottom:10px; }
+    .check-label { display:inline-flex; align-items:center; gap:7px; color:#506e84; font-size:12px; }
+    .survey-item { margin-bottom:19px; padding:17px; border:1px solid var(--line); border-radius:10px; }
+    .survey-item strong { display:block; margin-bottom:11px; font-size:13px; }
+    .survey-choice { display:flex; align-items:center; gap:9px; margin:9px 0; color:#506e84; font-size:13px; }
+    .survey-choice input { accent-color:var(--orange); }
+    .auth-wrap { min-height:100vh; display:grid; grid-template-columns:minmax(260px,1fr) minmax(400px,1fr); }
+    .auth-art { display:flex; flex-direction:column; justify-content:space-between; padding:50px clamp(30px,6vw,95px); background:var(--plum); color:#fff; }
+    .auth-art h1 { max-width:520px; font-size:clamp(39px,5vw,72px); line-height:1.05; }
+    .auth-art p { max-width:430px; color:#c8e2f2; font-size:15px; line-height:1.7; }
+    .auth-art .brand { padding:0; }
+    .auth-art small { color:#b5d5e9; font-size:11px; }
+    .auth-form { display:grid; place-items:center; padding:30px; }
+    .auth-card { width:min(370px,100%); }
+    .auth-card h2 { margin-bottom:8px; font-size:33px; font-weight:700; }
+    .auth-card .lead { margin-bottom:28px; }
+    .auth-card .btn { width:100%; margin-top:8px; }
+    .notice { position:fixed; z-index:30; right:22px; bottom:22px; max-width:min(390px,calc(100vw - 44px)); padding:13px 17px; border-radius:10px; background:var(--plum); color:#fff; box-shadow:0 12px 30px #0003; font-size:12px; }
+    .notice.error { background:#a34442; }
+    .sync-status { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted); }
+    .sync-status button { padding:4px 7px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); font-size:11px; }
+    .weighting-form { padding:17px; border:1px solid var(--line); border-radius:10px; background:#f4faff; }
+    .weighting-options { display:grid; gap:9px; margin:12px 0; }
+    .weighting-row { display:grid; grid-template-columns:minmax(0,1fr) 110px; align-items:center; gap:10px; font-size:12px; }
+    .weighting-row span { overflow-wrap:anywhere; }
+    .report-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:0 0 22px; }
+    .report-metric { padding:15px; border:1px solid var(--line); border-radius:9px; background:#f4faff; }
+    .report-metric strong { display:block; margin-top:5px; font-size:22px; }
+    .report-question { margin-top:14px; padding:17px; overflow-x:auto; border:1px solid var(--line); border-radius:10px; break-inside:avoid; }
+    .report-question h3 { margin-bottom:5px; line-height:1.4; }
+    .report-section { margin-top:18px; }
+    .analytical-body { margin-top:18px; padding:22px; border:1px solid var(--line); border-radius:10px; background:#f9fbfc; overflow-wrap:anywhere; line-height:1.5; font:14pt/1.5 "Times New Roman",Times,serif; text-align:justify; }
+    .analytical-body p { text-indent:1.25cm; margin:0 0 1em; }
+    .report-chart { display:grid; gap:10px; margin-top:16px; }
+    .report-bar-row { display:grid; grid-template-columns:minmax(100px,1fr) minmax(90px,2fr) 54px; gap:10px; align-items:center; font-size:12px; }
+    .report-bar-label { overflow-wrap:anywhere; }
+    .report-bar-track { height:12px; border-radius:6px; background:#eaf6ff; overflow:hidden; }
+    .report-bar-fill { display:block; height:100%; background:#357db4; border-radius:6px; }
+    .report-bar-value { text-align:right; font-variant-numeric:tabular-nums; }
+    .report-table { width:100%; min-width:420px; margin-top:12px; border-collapse:collapse; font-size:12px; }
+    .report-table th,.report-table td { padding:8px 5px; border-bottom:1px solid var(--line); text-align:left; }
+    .report-table th:not(:first-child),.report-table td:not(:first-child) { text-align:right; }
+    .quota-list { display:grid; gap:15px; }
+    .quota-group { padding:14px; border:1px solid var(--line); border-radius:9px; background:#f8fcff; }
+    .quota-group h3 { margin:0 0 11px; }
+    .quota-line { display:grid; grid-template-columns:minmax(95px,1fr) minmax(75px,2fr) 110px; gap:10px; align-items:center; margin:8px 0; font-size:12px; }
+    .quota-line span:first-child { overflow-wrap:anywhere; }
+    .quota-line strong { text-align:right; font-size:11px; }
+    .quota-edit { display:grid; gap:9px; margin:15px 0; }
+    .quota-input { display:grid; grid-template-columns:minmax(0,1fr) 110px; gap:9px; align-items:center; font-size:12px; }
+    .quota-input.range { grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto; }
+    .quota-input input { min-width:0; }
+    .quota-board { margin:32px 0; }
+    .quota-board .quota-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .chat-messages { display:grid; gap:10px; max-height:350px; overflow:auto; padding:15px; border:1px solid var(--line); border-radius:9px; background:#f8fcff; }
+    .chat-message { max-width:90%; padding:10px 13px; border-radius:9px; background:#fff; border:1px solid var(--line); }
+    .chat-message.own { justify-self:end; background:#eaf6ff; }
+    .chat-message header { display:flex; gap:12px; justify-content:space-between; color:var(--muted); font-size:10px; }
+    .chat-message p { margin:7px 0 0; font-size:13px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .chat-form { display:flex; gap:9px; align-items:flex-end; margin-top:12px; }
+    .chat-form textarea { min-height:65px; }
+    .member-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+    .member-check { padding:10px; border:1px solid var(--line); border-radius:8px; font-size:12px; }
+    .compound-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:8px; align-items:center; }
+    .compound-row .bounds { display:flex; gap:6px; }
+    .focus-guide { max-height:40vh; overflow:auto; padding:16px; border:1px solid var(--line); border-radius:10px; background:#f8fcff; }
+    .focus-guide p { margin:0; padding:13px 8px; white-space:pre-wrap; line-height:1.6; border-bottom:1px solid var(--line); }
+    .focus-guide p.active { border-radius:7px; background:#deefff; }
+    .focus-controls { display:flex; flex-wrap:wrap; gap:9px; align-items:center; margin:13px 0; }
+    .focus-tabs { display:flex; gap:6px; margin:20px 0; padding:5px; border-radius:10px; background:#eaf4fb; }
+    .focus-tabs button { flex:1; min-width:0; border:0; border-radius:7px; padding:11px 4px; background:transparent; color:var(--navy); font:inherit; font-size:12px; font-weight:700; overflow-wrap:anywhere; cursor:pointer; }
+    .focus-tabs button[aria-pressed="true"] { background:#fff; box-shadow:0 2px 8px #1d56701a; }
+    .focus-pane[hidden] { display:none; }
+    #focus-guide-stop[hidden] { display:none; }
+    .editor-layout { display:grid; grid-template-columns:minmax(0,2.4fr) minmax(285px,1fr); gap:18px; align-items:start; }
+    .editor-toolbar { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:17px; }
+    .editor-pane textarea { min-height:60vh; line-height:1.65; resize:vertical; }
+    .editor-actions { display:flex; flex-wrap:wrap; gap:9px; align-items:center; margin-top:14px; }
+    .assistant-pane { position:sticky; top:20px; }
+    .assistant-log { display:grid; align-content:start; gap:12px; min-height:230px; max-height:48vh; overflow:auto; margin-bottom:13px; padding:12px; border:1px solid var(--line); border-radius:9px; background:#f8fcff; }
+    .assistant-message { padding:11px 13px; border:1px solid var(--line); border-radius:9px; background:#fff; font-size:12px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .assistant-message.user { margin-left:18px; background:#eaf6ff; }
+    .assistant-prompts { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+    .assistant-prompts button { padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--plum); font-size:11px; }
+    .recording { color:#b03636; font-weight:700; }
+    .public-wrap { max-width:760px; margin:40px auto; padding:0 18px 50px; }
+    .public-wrap .box { margin-top:22px; }
+    .public-wrap .survey-item { background:#f8fcff; }
+    @media (max-width:1000px) { .stats { grid-template-columns:repeat(2,1fr); } .detail-layout,.editor-layout { grid-template-columns:1fr; } .assistant-pane { position:static; } }
+    @media (max-width:700px) { .shell { display:block; } .sidebar { position:relative; height:auto; padding:17px 16px 12px; } .brand { font-size:21px; } .brand-sub,.nav-label,.sidebar-bottom { display:none; } .sidebar nav { display:flex; gap:4px; margin-top:14px; overflow:auto; } .nav-item { width:auto; flex:none; padding:9px 10px; font-size:11px; } .main { padding:0 16px 50px; } .topbar { min-height:55px; height:auto; padding:9px 0; } .top-meta { display:none; } .page-head { align-items:start; flex-direction:column; margin:29px 0 21px; } .cards,.field-list,.quota-board .quota-list { grid-template-columns:1fr; } .auth-wrap { display:block; } .auth-art { min-height:260px; padding:25px; } .auth-art h1 { margin:30px 0 10px; font-size:35px; } .auth-art p { margin-bottom:10px; font-size:12px; } .auth-art small { display:none; } .auth-form { min-height:430px; } .modal-layer:has(#survey-form) { padding:0; } .modal:has(#survey-form) { width:100%; height:100dvh; max-height:100dvh; border-radius:0; padding:22px; } .survey-choice { min-height:44px; } .sync-status { flex-wrap:wrap; justify-content:flex-end; } }
+    @media (max-width:440px) { .stats { gap:8px; } .stat { min-height:110px; padding:14px; } .stat-number { font-size:30px; } .box { padding:17px; } .stage { font-size:9px; } .form-two,.member-grid,.compound-row,.editor-toolbar { grid-template-columns:1fr; } .modal { padding:19px; } .report-grid { grid-template-columns:1fr; } .report-bar-row { grid-template-columns:minmax(75px,1fr) minmax(60px,1fr) 48px; gap:6px; } }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="modal-layer" id="modal-layer"><div class="modal" id="modal"></div></div>
+  <script>
+    const state = { user: null, users: [], studies: [], tab: 'overview', selected: null, offline: false };
+    const stages = { development: 'Разработка', field: 'Полевой этап', processing: 'Обработка', completed: 'Завершено' };
+    const roles = { admin: 'Администратор', researcher: 'Исследователь', interviewer: 'Интервьюер' };
+    const fileKinds = { brief: 'ТЗ', questionnaire: 'Анкета', guide: 'Гайд', other: 'Другое' };
+    const types = { text: 'Короткий ответ', textarea: 'Развёрнутый ответ', number: 'Число', single: 'Один вариант', multiple: 'Несколько вариантов' };
+    const app = document.querySelector('#app');
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
+    const isAdmin = () => state.user?.role === 'admin';
+    const canManage = () => ['admin','researcher'].includes(state.user?.role) && !state.offline;
+    const allowedTabs = () => isAdmin() ? ['overview','studies','field','focus','editor','team'] : state.user?.role === 'researcher' ? ['studies','focus'] : ['field'];
+    const date = value => value ? new Date(value.length === 10 ? value + 'T12:00:00' : value).toLocaleDateString('ru-RU') : 'Не указан';
+    const study = id => state.studies.find(item => item.id === Number(id));
+    const focusSessions = new Map();
+    const transcriptionJobs = new Set();
+    const editorState = {studyId:null, document:'questionnaire', dirty:false, loading:0, history:[], revision:0, hintTimer:null, hintRequest:0, hintBusy:false, lastHintAt:0, lastHintText:''};
+    let recorder = null, pendingAudio = null;
+    window.addEventListener('beforeunload', event => { if (recorder?.state === 'recording' || pendingAudio || editorState.dirty) { event.preventDefault(); event.returnValue = ''; } });
+
+    function storage() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('mlsi-field', 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore('events', { keyPath:'id' });
+          request.result.createObjectStore('cache', { keyPath:'id' });
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+    async function store(storeName, mode, operation) {
+      const db = await storage();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, mode);
+        const request = operation(tx.objectStore(storeName));
+        tx.oncomplete = () => { resolve(request.result); db.close(); };
+        tx.onerror = () => { reject(tx.error); db.close(); };
+        tx.onabort = () => { reject(tx.error); db.close(); };
+      });
+    }
+    const queued = () => store('events','readonly', items => items.getAll());
+    async function updateSyncStatus() {
+      const count = (await queued()).filter(item => item.userId === state.user?.id).length;
+      const el = document.querySelector('#sync-status');
+      if (el) el.innerHTML = `${state.offline ? 'Нет сети · ' : ''}${count ? `На устройстве: ${count} · <button type="button" id="sync-now">Отправить</button>` : 'Все данные отправлены'}`;
+      const button = document.querySelector('#sync-now'); if (button) button.onclick = syncPending;
+    }
+    let syncing = false;
+    async function syncPending() {
+      if (syncing || !state.user || !navigator.onLine) return;
+      syncing = true;
+      try {
+        const session = await api('/session');
+        if (!session.user) { await store('cache','readwrite', items => items.delete('current')); state.user = null; renderAuth(false); notify('Срок входа истёк. Войдите снова, чтобы отправить очередь.',true); return; }
+        if (session.user.id !== state.user.id) { state.user = session.user; await refresh(); notify('Для отправки очереди войдите под пользователем, который собрал данные.',true); return; }
+        const events = (await queued()).filter(item => item.userId === session.user.id);
+        for (const item of events) {
+          await api(`/studies/${item.studyId}/${item.kind === 'refusal' ? 'refusals' : 'responses'}`, 'POST', item.body);
+          await store('events','readwrite', items => items.delete(item.id));
+        }
+        if (events.length || state.offline) { state.offline = false; await refresh(); if (events.length) notify(`Отправлено записей: ${events.length}`); }
+      } catch (error) { if (navigator.onLine) notify(`Очередь сохранена. Не удалось отправить: ${error.message}`,true); }
+      finally { syncing = false; updateSyncStatus().catch(() => {}); }
+    }
+    async function queueSurvey(s, kind, body) {
+      if (!crypto.randomUUID) throw new Error('Для офлайн-работы нужен HTTPS или localhost.');
+      const id = crypto.randomUUID();
+      await store('events','readwrite', items => items.add({ id, userId:state.user.id, studyId:s.id, kind, body:{...body, client_id:id} }));
+      updateSyncStatus().catch(() => {});
+      if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(reg => reg.sync?.register('mlsi-sync')).catch(() => {});
+      if (navigator.onLine) syncPending();
+    }
+
+    async function api(path, method='GET', body) {
+      let response;
+      try { response = await fetch('/api' + path, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: 'same-origin' }); }
+      catch { state.offline = true; throw new Error('Нет соединения с сервером. Данные остаются на устройстве.'); }
+      const data = await response.json();
+      if (!response.ok) { if (response.status === 401 && path !== '/login') { state.user = null; renderAuth(false); } throw new Error(data.error || 'Не удалось выполнить запрос'); }
+      return data;
+    }
+    let noticeTimer;
+    function notify(text, error=false) { document.querySelector('.notice')?.remove(); const el = document.createElement('div'); el.className = 'notice' + (error ? ' error' : ''); el.textContent = text; document.body.append(el); clearTimeout(noticeTimer); noticeTimer = setTimeout(() => el.remove(), 4500); }
+    async function refresh() { const [users, studies] = await Promise.all([isAdmin() ? api('/users') : Promise.resolve({users:[]}), api('/studies')]); state.users = users.users; state.studies = studies.studies; state.offline = false; if (!allowedTabs().includes(state.tab)) state.tab = allowedTabs()[0]; if (state.user.role === 'interviewer') state.selected = null; if (state.tab !== 'editor' || !editorState.dirty || state.selected != null) render(); try { await store('cache','readwrite', items => items.put({id:'current', user:state.user, users:[], studies:state.studies})); } catch { notify('Не удалось сохранить анкеты для офлайн-работы: проверьте память телефона.',true); } updateSyncStatus().catch(() => {}); }
+    async function boot() {
+      if (location.pathname.startsWith('/s/')) { await renderPublic(); return; }
+      try { const session = await api('/session'); state.user = session.user; if (!state.user) renderAuth(session.setup); else { await refresh(); syncPending(); } }
+      catch (error) {
+        if (!state.offline) { notify(error.message,true); return; }
+        try {
+          const cached = await store('cache','readonly', items => items.get('current'));
+          if (!cached?.user) { notify('Сначала войдите в приложение с интернетом, чтобы сохранить анкеты.',true); return; }
+          Object.assign(state,{user:cached.user,users:cached.users,studies:cached.studies,offline:true,tab:'field'});
+          render(); updateSyncStatus();
+          notify('Офлайн-режим: заполненные анкеты и отказы сохраняются на устройстве.');
+        } catch { notify('Офлайн-данные недоступны на этом устройстве.',true); }
+      }
+    }
+    window.addEventListener('online', () => { if (state.user) syncPending(); else boot(); });
+    window.addEventListener('focus', () => { if (state.user && navigator.onLine) syncPending(); });
+    setInterval(() => { if (state.user && navigator.onLine) queued().then(items => { if (state.offline || items.some(item => item.userId === state.user?.id)) syncPending(); }).catch(() => {}); }, 30000);
+    setInterval(() => { if (state.selected != null && !state.offline && document.visibilityState === 'visible') loadMessages(state.selected); }, 12000);
+    navigator.serviceWorker?.addEventListener('message', event => { if (event.data === 'mlsi-synced' && state.user && navigator.onLine) { refresh().catch(() => {}); updateSyncStatus().catch(() => {}); } });
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+    function renderAuth(setup) {
+      app.innerHTML = `<div class="auth-wrap"><div class="auth-art"><div class="brand">НИЛ «МЛСИ»</div><div><div class="eyebrow">Пространство для исследований</div><h1>Исследуйте людей.<br>Не теряйте детали.</h1><p>Проекты, команда, полевые этапы и данные опросов в одном рабочем пространстве лаборатории.</p></div><small>НИЛ «МЛСИ» / РАБОЧЕЕ ПРОСТРАНСТВО</small></div><div class="auth-form"><div class="auth-card"><div class="eyebrow">${setup ? 'Начало работы' : 'С возвращением'}</div><h2>${setup ? 'Создать лабораторию' : 'Войти в систему'}</h2><p class="lead">${setup ? 'Первая учётная запись получит права администратора.' : 'Введите данные своей учётной записи.'}</p><form id="auth-form" class="form-grid">${setup ? '<div><label class="field-label">Ваше имя</label><input name="name" required maxlength="100" autocomplete="name"></div>' : ''}<div><label class="field-label">Email</label><input name="email" type="email" required autocomplete="email"></div><div><label class="field-label">Пароль</label><input name="password" type="password" required minlength="10" autocomplete="${setup ? 'new-password' : 'current-password'}"></div><button class="btn" type="submit">${setup ? 'Создать пространство →' : 'Войти →'}</button></form></div></div></div>`;
+      document.querySelector('#auth-form').onsubmit = async event => { event.preventDefault(); const form = event.currentTarget; const data = Object.fromEntries(new FormData(form)); const button = form.querySelector('button'); button.disabled = true; try { await api(setup ? '/setup' : '/login', 'POST', data); const session = await api('/session'); state.user = session.user; await refresh(); syncPending(); } catch (error) { notify(error.message, true); } finally { button.disabled = false; } };
+    }
+
+    function render() {
+      if (!state.user) return;
+      if (!allowedTabs().includes(state.tab)) state.tab = allowedTabs()[0];
+      if (state.user.role === 'interviewer') state.selected = null;
+      const active = state.selected != null ? 'studies' : state.tab;
+      const navigation = [['overview','▦','Обзор'],['studies','◫','Исследования'],['field','◉','Полевой опрос'],['focus','◎','Фокус-группы'],['editor','✎','Редактор'],['team','♙','Команда']].filter(([key]) => allowedTabs().includes(key));
+      app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand">НИЛ «МЛСИ»</div><div class="brand-sub">Социологическая лаборатория</div><div class="nav-label">Рабочее пространство</div><nav>${navigation.map(([key,icon,label]) => `<button class="nav-item ${active === key ? 'active' : ''}" data-tab="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="user-card"><span class="avatar">${esc(state.user.name.slice(0,1).toUpperCase())}</span><div><strong>${esc(state.user.name)}</strong><small>${roles[state.user.role]}</small></div></div><button class="logout" id="logout">Выйти из аккаунта →</button></div></aside><div class="main"><div class="topbar"><span class="breadcrumb">НИЛ «МЛСИ» <span style="color:#94b2c8">/</span> <b>${state.selected != null ? 'Исследование' : ({overview:'Обзор',studies:'Исследования',field:'Полевой опрос',focus:'Фокус-группы',editor:'Редактор',team:'Команда'})[state.tab]}</b></span><span class="sync-status" id="sync-status"></span></div><main class="page" id="content">${state.selected != null ? renderDetail(study(state.selected)) : ({overview:renderOverview,studies:renderStudies,field:renderField,focus:renderFocus,editor:renderEditor,team:renderTeam})[state.tab]()}</main></div></div>`;
+      if (state.selected == null && state.tab === 'overview' && state.studies.some(s => s.member_quotas?.length)) {
+        document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="quota-board"><div class="section-head"><h2>Персональные составные квоты</h2><span>Без весов, Excel и ответов по ссылке</span></div><div class="quota-list">${state.studies.filter(s => s.member_quotas?.length).map(s => `<div class="quota-group"><h3>${esc(s.title)}</h3>${quotaMarkup(s.member_quotas.map(q => ({label:q.label + ' · ' + q.user_name,rows:[q]})))}</div>`).join('')}</div></section>`);
+      }
+      if (state.selected != null && study(state.selected)) {
+        const s = study(state.selected);
+        if (isAdmin()) document.querySelector('.page-head')?.insertAdjacentHTML('beforeend', `<button class="btn secondary" data-action="delete-study" data-id="${s.id}">Удалить проект</button>`);
+        document.querySelector('.detail-layout .description').insertAdjacentHTML('afterend', `<p class="description"><strong>Цель исследования</strong><br>${esc(s.goal || 'Не указана.')}</p><p class="description"><strong>Задачи исследования</strong><br>${esc(s.tasks || 'Не указаны.')}</p>`);
+        document.querySelector('.detail-layout > div:last-child').insertAdjacentHTML('beforeend', `<section class="box"><div class="box-title"><h2>Полевые результаты</h2></div><div class="info-grid"><div><div class="info-label">Заполнено анкет</div><div class="info-value">${s.response_count}</div></div><div><div class="info-label">Отказов</div><div class="info-value">${s.refusal_count ?? 0}</div></div></div><p class="muted" style="margin:14px 0 0">Неотправленные записи на телефоне появятся здесь после синхронизации.</p></section>`);
+        document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Команда и составные квоты</h2>${canManage() ? `<button class="btn small secondary" data-action="edit-members" data-id="${s.id}">Добавить сотрудников</button>` : ''}</div><p class="muted">Квота учитывает только анкеты, отправленные назначенным сотрудником, когда все условия выполняются одновременно. Ответы по ссылке и Excel сюда не входят.</p><p>${(s.member_ids || []).map(id => esc(state.users.find(u => u.id === id)?.name || `Сотрудник #${id}`)).join(', ') || 'Сотрудники пока не назначены.'}</p><div class="quota-list">${quotaMarkup((s.member_quotas || []).map(q => ({label:q.label + ' · ' + (state.users.find(u => u.id === q.user_id)?.name || `#${q.user_id}`),rows:[q]})))}</div>${canManage() ? `<button class="btn small secondary" data-action="edit-compound" data-id="${s.id}">Настроить составные квоты</button>` : ''}</section><section class="box report-section"><div class="box-title"><h2>Квоты по вопросам</h2></div><p class="muted">Прогресс по числу отправленных анкет без весов и отказов. До синхронизации ответы с телефона не учитываются.</p><div class="quota-list">${quotaMarkup(s.quotas || [])}</div>${canManage() ? `<button class="btn small secondary" type="button" data-action="edit-quotas" data-id="${s.id}">Настроить квоты</button>` : ''}</section>${canManage() ? `<section class="box report-section"><div class="box-title"><h2>Ссылка для онлайн-опроса</h2></div><p class="muted">Любой человек со ссылкой может ответить без учётной записи. Не передавайте ссылку вне целевой аудитории.</p><div id="survey-link">Загружаем ссылку…</div></section>` : ''}<section class="box report-section"><div class="box-title"><h2>Фокус-группы</h2>${canManage() ? `<button class="btn small secondary" data-action="new-focus" data-id="${s.id}">+ Новая группа</button>` : ''}</div><div id="focus-list">Загружаем встречи…</div></section><section class="box report-section"><div class="box-title"><h2>Чат исследования</h2><span class="muted">Команда проекта</span></div><div class="chat-messages" id="chat-messages" aria-live="polite"><p class="muted">Загружаем сообщения…</p></div>${!state.offline ? `<form id="chat-form" class="chat-form"><textarea name="body" maxlength="2000" required placeholder="Написать команде…" aria-label="Сообщение команде"></textarea><button class="btn small" type="submit">Отправить</button></form>` : '<p class="muted">Чат доступен только при подключении к серверу.</p>'}</section>`);
+        if (!isAdmin()) document.querySelectorAll('[data-action="edit-members"],[data-action="edit-compound"]').forEach(element => element.remove());
+        if (!state.offline) loadMessages(s.id);
+        if (canManage()) loadSurveyLink(s.id);
+        if (!state.offline) loadFocus(s.id); else document.querySelector('#focus-list').textContent = 'Фокус-группы доступны при подключении к серверу.';
+        const chat = document.querySelector('#chat-form'); if (chat) chat.onsubmit = event => sendMessage(event, s.id);
+      }
+      if (state.selected == null && state.tab === 'focus' && !state.offline) state.studies.forEach(s => loadFocus(s.id));
+      if (state.selected == null && state.tab === 'editor' && !state.offline && state.studies.length) bindEditor();
+      if (state.selected != null && canManage()) {
+        const s = study(state.selected);
+         if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(s.id, event.currentTarget); }
+      }
+      document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => { if (editorState.dirty && !confirm('Несохранённый текст редактора будет потерян. Продолжить?')) return; editorState.dirty = false; state.tab = button.dataset.tab; state.selected = null; render(); });
+      document.querySelector('#logout').onclick = async () => { try { if (!state.offline) await api('/logout','POST',{}); await store('cache','readwrite', items => items.delete('current')); clearTimeout(editorState.hintTimer); Object.assign(editorState,{dirty:false,history:[],hintRequest:editorState.hintRequest+1}); state.user = null; state.selected = null; state.tab = 'overview'; renderAuth(false); } catch (error) { notify(error.message,true); } };
+      document.querySelector('#content').onclick = handleClick;
+      const upload = document.querySelector('#upload-form'); if (upload) upload.onsubmit = uploadFile;
+      const excel = document.querySelector('#excel-import'); if (excel) excel.onchange = event => importExcel(event, state.selected);
+      const survey = document.querySelector('#survey-form'); if (survey) survey.onsubmit = submitSurvey;
+      updateSyncStatus().catch(() => {});
+    }
+    function heading(kicker,title,subtitle,action='') { return `<div class="page-head"><div><p class="eyebrow">${kicker}</p><h1>${title}</h1><p class="lead">${subtitle}</p></div>${action}</div>`; }
+    function studyCard(s) { return `<button class="study-card" data-action="open" data-id="${s.id}"><div class="card-top"><span class="card-id">ПРОЕКТ / ${String(s.id).padStart(3,'0')}</span><span class="badge ${s.stage}">${stages[s.stage]}</span></div><h3>${esc(s.title)}</h3><p>${esc(s.description || 'Описание исследования ещё не добавлено.')}</p><div class="card-foot"><span>◎ ${esc(s.responsible_name || 'Не назначен')}</span><span>◷ ${date(s.due_date)}</span></div></button>`; }
+    function empty(title,body) { return `<div class="empty"><strong>${title}</strong>${body}</div>`; }
+    function quotaMarkup(quotas) {
+      return quotas.length ? quotas.map(q => `<div class="quota-group"><h3>${esc(q.label)}</h3>${q.rows.map(row => `<div class="quota-line"><span>${esc(row.label)}</span><span class="report-bar-track"><span class="report-bar-fill" style="width:${Math.min(row.percent ?? 0,100)}%"></span></span><strong>${row.count} / ${row.target}${row.percent === null ? '' : ` (${row.percent}%)`}</strong></div>`).join('')}</div>`).join('') : '<p class="muted">Квоты пока не заданы.</p>';
+    }
+    function renderOverview() {
+      const studies = state.studies, active = studies.filter(s => s.stage !== 'completed');
+      return heading('Добро пожаловать','Работа в фокусе','Все исследования и полевые данные вашей команды в одном месте.', canManage() ? '<button class="btn" data-action="new-study">+ Новое исследование</button>' : '') + `<div class="stats"><div class="stat"><span class="stat-label">Всего исследований</span><strong class="stat-number">${studies.length}</strong><span class="stat-note">В базе лаборатории</span></div><div class="stat"><span class="stat-label">В работе</span><strong class="stat-number">${active.length}</strong><span class="stat-note">Активные проекты</span></div><div class="stat"><span class="stat-label">Полевой этап</span><strong class="stat-number">${studies.filter(s => s.stage === 'field').length}</strong><span class="stat-note">Сбор данных</span></div><div class="stat"><span class="stat-label">Собрано анкет</span><strong class="stat-number">${studies.reduce((n,s) => n+s.response_count,0)}</strong><span class="stat-note">Ответы респондентов</span></div></div>${canManage() && studies.some(s => s.quotas?.length) ? `<section class="quota-board"><div class="section-head"><h2>Прогресс квот</h2><span>Без весов и отказов</span></div><div class="quota-list">${studies.filter(s => s.quotas?.length).map(s => `<div class="quota-group"><h3>${esc(s.title)}</h3>${quotaMarkup(s.quotas)}</div>`).join('')}</div></section>` : ''}<div class="section-head"><h2>Последние исследования</h2><span>${studies.length} проектов</span></div>${studies.length ? `<div class="cards">${studies.slice(0,4).map(studyCard).join('')}</div>` : empty('Пока нет исследований','Создайте первый проект, чтобы начать планирование.')}`;
+    }
+    function renderStudies() { return heading('Реестр проектов','Исследования','От идеи и полевого этапа до обработки и результата.',canManage() ? '<button class="btn" data-action="new-study">+ Новое исследование</button>' : '') + (state.studies.length ? `<div class="cards">${state.studies.map(studyCard).join('')}</div>` : empty('Исследований пока нет','Добавьте проект, чтобы вести его этапы, файлы и анкету.')); }
+    function renderDetail(s) {
+      if (!s) { state.selected = null; return empty('Проект не найден','Вернитесь к списку исследований.'); }
+      const stageKeys = Object.keys(stages), current = stageKeys.indexOf(s.stage);
+      return `<div style="margin-top:25px"><button class="back" data-action="back">← Все исследования</button></div>${heading('Исследование / '+String(s.id).padStart(3,'0'),esc(s.title),'Создано '+date(s.created_at),canManage() ? `<button class="btn secondary" data-action="edit-study" data-id="${s.id}">Изменить проект</button>` : '')}<div class="detail-layout"><div><section class="box"><div class="box-title"><h2>Карточка проекта</h2><span class="badge ${s.stage}">${stages[s.stage]}</span></div><p class="description">${esc(s.description || 'Описание исследования пока не добавлено.')}</p><div class="info-grid"><div><div class="info-label">Ответственный</div><div class="info-value">${esc(s.responsible_name || 'Не назначен')}</div></div><div><div class="info-label">Срок завершения</div><div class="info-value">${date(s.due_date)}</div></div></div></section><section class="box"><div class="box-title"><h2>Документы проекта</h2><span class="muted">${s.files.length} файлов</span></div>${s.files.length ? s.files.map(f => `<div class="file-row"><span class="file-icon">▤</span><a href="/api/studies/${s.id}/files/${f.id}" title="Скачать ${esc(f.name)}">${esc(f.name)}</a><small>${fileKinds[f.kind]} · ${(f.size/1024).toFixed(0)} КБ</small></div>`).join('') : '<p class="muted">Здесь будут ТЗ, анкета, гайд и другие материалы.</p>'}${canManage() ? `<form id="upload-form" class="upload-form" data-id="${s.id}"><input name="file" type="file" required aria-label="Выберите файл"><select name="kind" aria-label="Тип файла"><option value="brief">ТЗ</option><option value="questionnaire">Анкета</option><option value="guide">Гайд</option><option value="other">Другое</option></select><button class="btn small secondary" type="submit">Загрузить</button></form><p class="muted" style="margin:9px 0 0">До 5 МБ на файл. Для интерактивного опроса заполните анкету справа.</p>` : ''}</section></div><div><section class="box"><div class="box-title"><h2>Этап исследования</h2></div><div class="stage-list">${stageKeys.map((key,i) => canManage() ? `<button class="stage ${i === current ? 'current' : i < current ? 'past' : ''}" data-action="stage" data-id="${s.id}" data-stage="${key}">${stages[key]}</button>` : `<div class="stage ${i === current ? 'current' : i < current ? 'past' : ''}">${stages[key]}</div>`).join('')}</div><p class="muted">${canManage() ? 'Нажмите на этап, чтобы обновить статус проекта.' : 'Текущий статус исследования.'}</p></section><section class="box"><div class="box-title"><h2>Анкета для опроса</h2></div><p class="muted">${s.questions.length ? `${s.questions.length} вопросов · ${s.response_count} ответов респондентов` : 'Создайте вопросы для интервьюеров или загрузите JSON-анкету.'}</p>${s.questions.length ? `<div style="margin-bottom:17px">${s.questions.slice(0,3).map((q,i) => `<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:12px">${i+1}. ${esc(q.label)}</div>`).join('')}${s.questions.length > 3 ? `<p class="muted">И ещё ${s.questions.length-3} вопросов</p>` : ''}</div>` : ''}<div style="display:flex;gap:8px;flex-wrap:wrap">${canManage() && s.response_count === 0 ? `<button class="btn small secondary" data-action="questions" data-id="${s.id}">${s.questions.length ? 'Редактировать' : 'Создать анкету'}</button>` : ''}${s.questions.length ? `<button class="btn small orange" data-action="survey" data-id="${s.id}">Начать опрос</button>` : ''}${canManage() && s.questions.length ? `<a class="btn small secondary" href="/api/studies/${s.id}/responses.csv">Скачать CSV ↓</a>` : ''}</div>${s.response_count ? '<p class="muted" style="margin:12px 0 0">Анкета защищена от изменений после первого ответа.</p>' : ''}</section></div></div>`;
+    }
+    function renderField() { const available = state.studies.filter(s => s.questions.length); return heading('Сбор данных','Полевой опрос','Просматривайте анкеты и сохраняйте ответы респондентов.', '') + (available.length ? `<div class="field-list">${available.map(s => `<div class="field-card"><span class="badge ${s.stage}">${stages[s.stage]}</span><h3>${esc(s.title)}</h3><p>${s.questions.length} вопросов${isAdmin() ? ` · ${s.response_count} анкет · ${s.refusal_count ?? 0} отказов` : ''}</p><button class="btn small orange" data-action="survey" data-id="${s.id}">Открыть анкету →</button></div>`).join('')}</div>` : empty('Нет активных анкет','Администратор или исследователь должен создать интерактивную анкету в карточке проекта.')); }
+    function renderFocus() { return heading('Работа с участниками','Фокус-группы','Встречи, гайды модератора, аудиозаписи и расшифровки в одном месте.') + (state.studies.length ? state.studies.map(s => `<section class="box report-section"><div class="box-title"><h2>${esc(s.title)}</h2>${canManage() ? `<button class="btn small secondary" data-action="new-focus" data-id="${s.id}">+ Новая группа</button>` : ''}</div><div id="focus-list-${s.id}">${state.offline ? 'Фокус-группы доступны при подключении к серверу.' : 'Загружаем встречи…'}</div></section>`).join('') : empty('Пока нет исследований','Создайте исследование, чтобы проводить фокус-группы.')); }
+    function renderEditor() {
+      if (state.offline) return heading('Методический кабинет','Редактор анкет и гайдов','Нужно подключение к серверу.') + empty('Редактор недоступен офлайн','Подключитесь к сети, чтобы сохранить черновики и получить рекомендации.');
+      if (!state.studies.length) return heading('Методический кабинет','Редактор анкет и гайдов','Сначала создайте исследование.') + empty('Нет исследований','Добавьте проект во вкладке «Исследования».');
+      return heading('Методический кабинет','Редактор анкет и гайдов','Рабочие тексты проекта и методические рекомендации рядом.') + `<div class="editor-layout"><section class="box editor-pane"><div class="editor-toolbar"><label class="field-label">Исследование<select id="editor-study">${state.studies.map(s => `<option value="${s.id}" ${s.id === editorState.studyId ? 'selected' : ''}>${esc(s.title)}</option>`).join('')}</select></label><label class="field-label">Документ<select id="editor-document"><option>Загружаем…</option></select></label></div><p class="muted" id="editor-hint">Загружаем документ…</p><label class="field-label" for="editor-body">Текст документа</label><textarea id="editor-body" maxlength="40000" placeholder="Запишите здесь формулировки вопросов, варианты ответов или пункты гайда…" disabled></textarea><div class="editor-actions"><button type="button" class="btn" id="editor-save" disabled>Сохранить</button><button type="button" class="btn small secondary" id="editor-next" hidden></button><span class="muted" id="editor-status" aria-live="polite"></span></div></section><aside class="box assistant-pane"><div class="eyebrow">Методический ассистент</div><h2>Второй взгляд</h2><p class="muted">Спросите о формулировках, логике опроса, этике, альтернативах и пропущенных темах. Ответы ИИ проверяйте самостоятельно: поиска в интернете нет.</p><p class="muted">Если ИИ не настроен, задайте <code>DEEPSEEK_API_KEY</code> в окружении перед запуском сервера. Инструкция есть в README.</p><div class="assistant-log" id="assistant-log" aria-live="polite"><div class="assistant-message">Опишите задачу или выберите подсказку ниже. Текущий текст редактора отправляется в DeepSeek только при запросе. Не вставляйте персональные данные участников.</div></div><div class="assistant-prompts"><button type="button" data-prompt="Проверь формулировки на наводящие вопросы и двусмысленности.">Проверить вопросы</button><button type="button" data-prompt="Какие важные темы или варианты ответа упущены?">Найти пробелы</button><button type="button" data-prompt="Предложи более удачный порядок и способы улучшить этот документ.">Улучшить структуру</button></div><form id="assistant-form"><label class="field-label" for="assistant-input">Вопрос помощнику</label><textarea id="assistant-input" maxlength="2000" required placeholder="Что стоит улучшить в этом тексте?"></textarea><button class="btn small" type="submit">Спросить ИИ →</button></form></aside></div>`;
+    }
+    function parseDraftQuestions(text) {
+      const blocks = text.trim().split(/\n\s*\n/).filter(Boolean);
+      if (!blocks.length || blocks.length > 40) throw new Error('Укажите от 1 до 40 вопросов, разделённых пустыми строками.');
+      return blocks.map(block => {
+        const [first,...rest] = block.split('\n').map(line => line.trim()).filter(Boolean);
+        if (rest.some(line => !/^[-•]\s+/.test(line))) throw new Error('Варианты ответа начинайте с «- » и размещайте по одному на строке.');
+        const label = first.replace(/^\d+[.)]\s*/, '');
+        const options = rest.map(line => line.replace(/^[-•]\s+/, '').trim());
+        if (!label || label.length > 250 || options.some(option => !option || option.length > 180)) throw new Error('Проверьте длину вопросов и вариантов ответа.');
+        return {label,type:options.length ? 'single' : 'text',options,required:false};
+      });
+    }
+    function bindEditor() {
+      const studySelect = document.querySelector('#editor-study'), documentSelect = document.querySelector('#editor-document');
+      const body = document.querySelector('#editor-body'), save = document.querySelector('#editor-save');
+      const next = document.querySelector('#editor-next'), hint = document.querySelector('#editor-hint'), status = document.querySelector('#editor-status');
+      if (!study(editorState.studyId)) editorState.studyId = Number(studySelect.value);
+      studySelect.value = String(editorState.studyId);
+      async function selectStudy() {
+        const sid = Number(studySelect.value), request = ++editorState.loading;
+        documentSelect.disabled = body.disabled = save.disabled = true;
+        editorState.history = [];
+        document.querySelector('#assistant-log').innerHTML = '<div class="assistant-message">Выберите документ и задайте вопрос о его содержании.</div>';
+        try {
+          const {sessions} = await api(`/studies/${sid}/focus`);
+          if (request !== editorState.loading || !documentSelect.isConnected) return;
+          focusSessions.set(sid,sessions);
+          documentSelect.innerHTML = `<option value="questionnaire">Анкета · черновик</option><option value="guide">Гайд · черновик</option>${sessions.map(item => `<option value="focus:${item.id}">Гайд встречи · ${esc(item.title)}</option>`).join('')}`;
+          if (![...documentSelect.options].some(option => option.value === editorState.document)) editorState.document = 'questionnaire';
+          documentSelect.value = editorState.document;
+          documentSelect.disabled = false;
+          await selectDocument();
+        } catch (error) { if (request === editorState.loading && documentSelect.isConnected) status.textContent = error.message; }
+      }
+      async function selectDocument() {
+        const sid = Number(studySelect.value), key = documentSelect.value, request = ++editorState.loading;
+        clearTimeout(editorState.hintTimer); editorState.revision++; editorState.hintRequest++; editorState.lastHintText = '';
+        body.disabled = save.disabled = true;
+        status.textContent = 'Загружаем…';
+        try {
+          const session = key.startsWith('focus:') ? focusSessions.get(sid)?.find(item => item.id === Number(key.slice(6))) : null;
+          const text = session ? session.guide : (await api(`/studies/${sid}/editor/${key}`)).body;
+          if (request !== editorState.loading || !body.isConnected) return;
+          body.value = text;
+          editorState.studyId = sid; editorState.document = key; editorState.dirty = false;
+          body.maxLength = key === 'questionnaire' ? 40000 : 20000;
+          body.disabled = save.disabled = false;
+          status.textContent = 'Текст загружен';
+          hint.textContent = key === 'questionnaire' ? 'Это черновик, он не меняет действующую анкету. Чтобы перенести вопросы в опрос, разделяйте их пустой строкой, а варианты ответа начинайте с «- ». Типы вопросов и обязательность можно уточнить в конструкторе.' : session ? 'Изменения гайда этой встречи станут доступны модератору после сохранения.' : 'Черновик гайда можно использовать при создании новой фокус-группы. Каждый пункт пишите с новой строки.';
+          next.hidden = Boolean(session);
+          if (!session) next.textContent = key === 'questionnaire' ? 'Перенести в конструктор' : 'Создать встречу с гайдом';
+        } catch (error) { if (request === editorState.loading && body.isConnected) status.textContent = error.message; }
+      }
+      studySelect.onchange = () => { if (editorState.dirty && !confirm('Несохранённый текст будет потерян. Продолжить?')) { studySelect.value = String(editorState.studyId); return; } editorState.document = 'questionnaire'; editorState.dirty = false; selectStudy(); };
+      documentSelect.onchange = () => { if (editorState.dirty && !confirm('Несохранённый текст будет потерян. Продолжить?')) { documentSelect.value = editorState.document; return; } editorState.dirty = false; editorState.history = []; document.querySelector('#assistant-log').innerHTML = '<div class="assistant-message">Задайте вопрос о выбранном документе.</div>'; selectDocument(); };
+      body.oninput = () => { editorState.dirty = true; editorState.revision++; status.textContent = 'Не сохранено'; };
+      async function saveEditor() {
+        const key = documentSelect.value, sid = Number(studySelect.value);
+        save.disabled = true;
+        try {
+          if (key.startsWith('focus:')) {
+            await api(`/studies/${sid}/focus/${Number(key.slice(6))}/guide`,'PUT',{guide:body.value});
+            const session = focusSessions.get(sid)?.find(item => item.id === Number(key.slice(6)));
+            if (session) session.guide = body.value.trim();
+          } else await api(`/studies/${sid}/editor/${key}`,'PUT',{body:body.value});
+          editorState.dirty = false;
+          status.textContent = 'Сохранено';
+          return true;
+        } catch (error) { status.textContent = error.message; notify(error.message,true); return false; }
+        finally { save.disabled = false; }
+      }
+      save.onclick = saveEditor;
+      next.onclick = async () => {
+        const s = study(studySelect.value);
+        if (editorState.dirty && !await saveEditor()) return;
+        if (documentSelect.value === 'questionnaire') {
+          try { editQuestions(s,parseDraftQuestions(body.value)); } catch (error) { notify(error.message,true); }
+        } else newFocus(s,body.value);
+      };
+      bindAssistant(studySelect,documentSelect,body);
+      selectStudy();
+    }
+    function bindAssistant(studySelect, documentSelect, body) {
+      const form = document.querySelector('#assistant-form'), input = document.querySelector('#assistant-input');
+      const log = document.querySelector('#assistant-log'), button = form.querySelector('button');
+      log.insertAdjacentHTML('beforebegin', '<label class="check-label"><input type="checkbox" id="live-hints" checked> Подсказки при редактировании</label><div class="assistant-message" id="live-hint">После паузы в наборе ИИ автоматически проверит текст. Не вводите персональные или конфиденциальные данные.</div>');
+      const liveToggle = document.querySelector('#live-hints'), liveHint = document.querySelector('#live-hint');
+      async function requestHint() {
+        clearTimeout(editorState.hintTimer);
+        if (!liveToggle.checked || body.disabled || body.value.trim().length < 50) return;
+        if (editorState.hintBusy) { editorState.hintTimer = setTimeout(requestHint,2000); return; }
+        const wait = 15000 - (Date.now() - editorState.lastHintAt);
+        if (wait > 0) { editorState.hintTimer = setTimeout(requestHint,wait); return; }
+        const text = body.value, sid = Number(studySelect.value), docKey = documentSelect.value, revision = editorState.revision;
+        if (text === editorState.lastHintText) return;
+        const request = ++editorState.hintRequest;
+        editorState.hintBusy = true; editorState.lastHintAt = Date.now(); liveHint.textContent = 'Проверяем последние изменения…';
+        try {
+          const kind = docKey === 'questionnaire' ? 'questionnaire' : 'guide';
+          const {answer} = await api(`/studies/${sid}/editor/assist`,'POST',{kind,body:text,question:'Проверь текущий текст.',history:[],mode:'hint'});
+          if (request !== editorState.hintRequest || revision !== editorState.revision || Number(studySelect.value) !== sid || documentSelect.value !== docKey || !liveHint.isConnected) return;
+          editorState.lastHintText = text; liveHint.textContent = answer;
+        } catch (error) { if (request === editorState.hintRequest && liveHint.isConnected) liveHint.textContent = error.message; }
+        finally { editorState.hintBusy = false; if (revision !== editorState.revision && liveToggle.isConnected && liveToggle.checked) editorState.hintTimer = setTimeout(requestHint,2000); }
+      }
+      body.addEventListener('input', () => { clearTimeout(editorState.hintTimer); if (liveToggle.checked) editorState.hintTimer = setTimeout(requestHint,2000); });
+      liveToggle.onchange = () => { clearTimeout(editorState.hintTimer); if (liveToggle.checked) editorState.hintTimer = setTimeout(requestHint,500); else { editorState.hintRequest++; liveHint.textContent = 'Автоматические подсказки отключены.'; } };
+      function addMessage(text, role) {
+        const message = document.createElement('div');
+        message.className = `assistant-message ${role}`;
+        message.textContent = text;
+        log.append(message);
+        log.scrollTop = log.scrollHeight;
+      }
+      document.querySelectorAll('[data-prompt]').forEach(prompt => prompt.onclick = () => { input.value = prompt.dataset.prompt; form.requestSubmit(); });
+      form.onsubmit = async event => {
+        event.preventDefault();
+        const question = input.value.trim(), sid = Number(studySelect.value), docKey = documentSelect.value;
+        const kind = docKey === 'questionnaire' ? 'questionnaire' : 'guide';
+        if (!question || body.disabled || button.disabled) return;
+        button.disabled = true;
+        addMessage(question,'user');
+        const history = editorState.history.slice(-6);
+        try {
+          const {answer} = await api(`/studies/${sid}/editor/assist`,'POST',{kind,body:body.value,question,history,mode:'manual'});
+          if (!log.isConnected || Number(studySelect.value) !== sid || documentSelect.value !== docKey) return;
+          addMessage(answer,'assistant');
+          editorState.history = [...history,{role:'user',content:question},{role:'assistant',content:answer.slice(0,2000)}].slice(-6);
+          input.value = '';
+        } catch (error) { if (log.isConnected) addMessage(error.message,'error'); }
+        finally { if (button.isConnected) button.disabled = false; }
+      };
+    }
+    function renderTeam() { return heading('Люди лаборатории','Команда','Исследователи, интервьюеры и администраторы в одном рабочем пространстве.',state.user.role === 'admin' ? '<button class="btn" data-action="new-user">+ Добавить сотрудника</button>' : '') + `<div class="team-list">${state.users.map(u => `<div class="team-row"><span class="avatar">${esc(u.name.slice(0,1).toUpperCase())}</span><div><strong>${esc(u.name)}</strong><small>${esc(u.email)}</small></div><span class="badge">${roles[u.role]}</span></div>`).join('')}</div>`; }
+
+    function openModal(title, body, wide=false) { const layer = document.querySelector('#modal-layer'), modal = document.querySelector('#modal'); modal.className = 'modal' + (wide ? ' wide' : ''); modal.innerHTML = `<div class="modal-head"><h2>${title}</h2><button class="close" type="button" aria-label="Закрыть">×</button></div>${body}`; layer.classList.add('show'); modal.querySelector('.close').onclick = closeModal; }
+    function closeModal() { if (recorder?.state === 'recording') return notify('Сначала остановите запись и дождитесь сохранения.',true); document.querySelector('#modal-layer').classList.remove('show'); }
+    document.querySelector('#modal-layer').addEventListener('click', event => { if (event.target.id === 'modal-layer') closeModal(); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeModal(); });
+    async function handleClick(event) {
+      const button = event.target.closest('[data-action]'); if (!button) return;
+      const { action, id } = button.dataset; const s = study(id);
+      const permitted = isAdmin() || (state.user.role === 'researcher' && ['open','back','new-study','edit-study','questions','edit-quotas','new-focus','open-focus','link-create','link-revoke','stage'].includes(action)) || (state.user.role === 'interviewer' && action === 'survey');
+      if (!permitted) return notify('Недостаточно прав для этого действия',true);
+      if (action === 'open') { state.selected = Number(id); render(); }
+      if (action === 'back') { state.selected = null; state.tab = 'studies'; render(); }
+      if (action === 'new-study' || action === 'edit-study') editStudy(action === 'edit-study' ? s : null);
+      if (action === 'new-user') newUser();
+      if (action === 'questions' && s) editQuestions(s);
+      if (action === 'edit-quotas' && s) editQuotas(s);
+      if (action === 'edit-members' && s) editMembers(s);
+      if (action === 'edit-compound' && s) editCompound(s);
+      if (action === 'new-focus' && s) newFocus(s);
+      if (action === 'open-focus' && s) openFocus(s, Number(button.dataset.focus));
+      if (action === 'link-create' && s) changeSurveyLink(s, 'PUT');
+      if (action === 'link-revoke' && s && confirm('Отключить ссылку? Новые ответы по ней перестанут приниматься.')) changeSurveyLink(s, 'DELETE');
+      if (action === 'survey' && s) openSurvey(s);
+      if (action === 'stage' && s) { try { await api('/studies/'+s.id,'PATCH',{ title:s.title,description:s.description,goal:s.goal,tasks:s.tasks,due_date:s.due_date,responsible_id:s.responsible_id,stage:button.dataset.stage }); await refresh(); notify('Этап исследования обновлён'); } catch (error) { notify(error.message,true); } }
+      if (action === 'delete-study' && s) deleteStudy(s);
+    }
+    async function deleteStudy(s) {
+      if (!confirm(`Удалить исследование «${s.title}» и все анкеты, файлы, отчёты и фокус-группы? Это действие нельзя отменить.`)) return;
+      try { await api(`/studies/${s.id}`,'DELETE'); state.selected = null; await refresh(); notify('Исследование удалено'); }
+      catch (error) { notify(error.message,true); }
+    }
+    function editStudy(s) {
+      const people = state.users.filter(u => ['admin','researcher'].includes(u.role));
+      openModal(s ? 'Изменить исследование' : 'Новое исследование',`<form id="study-form" class="form-grid"><div><label class="field-label">Название исследования *</label><input name="title" required maxlength="180" value="${esc(s?.title || '')}" placeholder="Например: Мобильность горожан"></div><div><label class="field-label">Описание</label><textarea name="description" maxlength="2000" placeholder="Краткое описание проекта">${esc(s?.description || '')}</textarea></div><div><label class="field-label">Цель исследования</label><textarea name="goal" maxlength="2000" placeholder="Что необходимо установить">${esc(s?.goal || '')}</textarea></div><div><label class="field-label">Задачи исследования (по одной на строке)</label><textarea name="tasks" maxlength="4000" placeholder="Описать ситуацию&#10;Определить ключевые факторы">${esc(s?.tasks || '')}</textarea></div><div class="form-two"><div><label class="field-label">Ответственный</label><select name="responsible_id"><option value="">Не назначен</option>${people.map(u => `<option value="${u.id}" ${s?.responsible_id === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div><div><label class="field-label">Срок</label><input name="due_date" type="date" value="${esc(s?.due_date || '')}"></div></div><div class="actions"><button class="btn secondary" type="button" id="cancel">Отмена</button><button class="btn" type="submit">Сохранить</button></div></form>`);
+      document.querySelector('#cancel').onclick = closeModal;
+      document.querySelector('#study-form').onsubmit = async event => { event.preventDefault(); const form = event.currentTarget, data = Object.fromEntries(new FormData(form)); if (isAdmin()) data.responsible_id = data.responsible_id ? Number(data.responsible_id) : null; else delete data.responsible_id; try { const result = await api(s ? '/studies/'+s.id : '/studies',s ? 'PATCH' : 'POST',s ? { ...data, stage:s.stage } : data); closeModal(); if (!s) state.selected = result.id; await refresh(); notify('Исследование сохранено'); } catch (error) { notify(error.message,true); } };
+    }
+    function newUser() {
+      openModal('Новый сотрудник',`<form id="user-form" class="form-grid"><div><label class="field-label">Имя *</label><input name="name" required maxlength="100" autocomplete="name"></div><div><label class="field-label">Email *</label><input name="email" type="email" required autocomplete="email"></div><div><label class="field-label">Роль</label><select name="role"><option value="researcher">Исследователь</option><option value="interviewer">Интервьюер</option><option value="admin">Администратор</option></select></div><div><label class="field-label">Временный пароль (не менее 10 символов) *</label><input name="password" type="password" required minlength="10" autocomplete="new-password"></div><p class="muted">Передайте сотруднику пароль безопасным способом. Попросите его сменить пароль вне общей переписки.</p><div class="actions"><button class="btn" type="submit">Создать аккаунт</button></div></form>`);
+      document.querySelector('#user-form').onsubmit = async event => { event.preventDefault(); try { await api('/users','POST',Object.fromEntries(new FormData(event.currentTarget))); closeModal(); await refresh(); notify('Сотрудник добавлен'); } catch (error) { notify(error.message,true); } };
+    }
+    function editQuotas(s) {
+      const questions = s.questions.filter(q => ['single','multiple','number'].includes(q.type));
+      if (!questions.length) { notify('Сначала добавьте в анкету вопросы с вариантами или числовые вопросы.',true); return; }
+      openModal('Квоты исследования', `<p class="muted">Для каждого вопроса настройте план отдельно. Пустой план не ограничивает категорию. Для чисел укажите полуоткрытые диапазоны: от включительно, до не включительно. Квоты показывают прогресс, но не блокируют сбор сверх плана.</p><form id="quota-form" class="form-grid"><label class="field-label" for="quota-question">Вопрос</label><select id="quota-question">${questions.map(q => `<option value="${esc(q.id)}">${esc(q.label)}</option>`).join('')}</select><div id="quota-edit" class="quota-edit"></div><div class="actions"><button type="button" class="btn secondary" id="cancel">Закрыть</button><button class="btn" type="submit">Сохранить план</button></div></form>`,true);
+      const form = document.querySelector('#quota-form'), select = form.querySelector('#quota-question'), rows = form.querySelector('#quota-edit');
+      const range = (row={}) => `<div class="quota-input range"><input type="number" step="any" class="quota-min" placeholder="От" value="${row.min ?? ''}" aria-label="Нижняя граница"><input type="number" step="any" class="quota-max" placeholder="До" value="${row.max ?? ''}" aria-label="Верхняя граница"><input type="number" step="1" min="0" class="quota-target" placeholder="План" value="${row.target ?? ''}" aria-label="План анкет"><button type="button" class="text-button remove-range">Удалить</button></div>`;
+      const show = () => {
+        const q = questions.find(item => item.id === select.value), saved = s.quotas?.find(item => item.question_id === q.id)?.rows || [];
+        rows.innerHTML = q.type === 'number' ? `<div id="ranges">${saved.map(range).join('')}</div><button class="btn small secondary" type="button" id="add-range">+ Диапазон</button>` : q.options.map(option => `<label class="quota-input"><span>${esc(option)}</span><input type="number" step="1" min="0" placeholder="Без плана" data-option="${esc(option)}" value="${saved.find(item => item.option === option)?.target ?? ''}"></label>`).join('');
+        const add = rows.querySelector('#add-range'); if (add) add.onclick = () => { if (rows.querySelectorAll('.quota-input.range').length >= 20) return notify('Не более 20 диапазонов',true); rows.querySelector('#ranges').insertAdjacentHTML('beforeend',range()); };
+      };
+      select.onchange = show; show();
+      rows.onclick = event => { if (event.target.matches('.remove-range')) event.target.closest('.quota-input').remove(); };
+      document.querySelector('#cancel').onclick = closeModal;
+      form.onsubmit = async event => {
+        event.preventDefault(); const q = questions.find(item => item.id === select.value);
+        const rules = q.type === 'number' ? [...rows.querySelectorAll('.quota-input.range')].map(item => ({min:item.querySelector('.quota-min').value,max:item.querySelector('.quota-max').value,target:item.querySelector('.quota-target').value})).filter(item => item.min || item.max || item.target) : [...rows.querySelectorAll('[data-option]')].filter(input => input.value !== '').map(input => ({option:input.dataset.option,target:input.value}));
+        if (q.type === 'number' && rules.some(item => item.min === '' || item.max === '' || item.target === '')) { notify('Заполните границы и план каждого диапазона.',true); return; }
+        try { await api(`/studies/${s.id}/quotas`,'PUT',{question_id:q.id,rows:rules.map(item => ({...item,target:Number(item.target)}))}); closeModal(); await refresh(); notify('План квот сохранён'); } catch (error) { notify(error.message,true); }
+      };
+    }
+    function editMembers(s) {
+      openModal('Команда исследования', `<p class="muted">Назначьте сотрудников для планирования персональных квот. Назначение не ограничивает доступ к остальным проектам лаборатории.</p><form id="members-form" class="form-grid"><div class="member-grid">${state.users.map(u => `<label class="member-check"><input type="checkbox" value="${u.id}" ${(s.member_ids || []).includes(u.id) ? 'checked' : ''}> ${esc(u.name)} · ${roles[u.role]}</label>`).join('')}</div><button class="btn" type="submit">Сохранить команду</button></form>`);
+      document.querySelector('#members-form').onsubmit = async event => { event.preventDefault(); try { await api(`/studies/${s.id}/members`,'PUT',{user_ids:[...event.currentTarget.querySelectorAll(':checked')].map(el => Number(el.value))}); closeModal(); await refresh(); notify('Команда обновлена'); } catch (error) { notify(error.message,true); } };
+    }
+    function editCompound(s) {
+      const eligible = s.questions.filter(q => ['single','multiple','number'].includes(q.type));
+      if (!eligible.length || !s.member_ids?.length) return notify('Сначала добавьте сотрудников и вопросы с вариантами или числовыми ответами.',true);
+      openModal('Составные квоты', `<p class="muted">Все условия квоты должны выполняться одновременно. Для возраста 35+ укажите только нижнюю границу 35. Верхняя граница не включается. Каждая анкета сотрудника учитывается один раз в каждой подходящей квоте.</p><div id="compound-existing">${(s.member_quotas || []).map(q => `<div class="file-row"><strong>${esc(q.label)}</strong><small>${esc(state.users.find(u => u.id === q.user_id)?.name || '#' + q.user_id)} · ${q.count}/${q.target}</small><button class="text-button" type="button" data-remove-quota="${q.id}">Удалить</button></div>`).join('') || '<p class="muted">Квот пока нет.</p>'}</div><form id="compound-form" class="form-grid"><label class="field-label">Сотрудник<select id="compound-user">${s.member_ids.map(id => `<option value="${id}">${esc(state.users.find(u => u.id === id)?.name || '#' + id)}</option>`).join('')}</select></label><div class="form-two"><label class="field-label">Название квоты<input id="compound-label" maxlength="180" required placeholder="Женщины 35+" ></label><label class="field-label">План анкет<input id="compound-target" type="number" min="1" max="1000000" step="1" required></label></div><div id="compound-conditions" class="form-grid"></div><button type="button" class="btn small secondary" id="add-condition">+ Условие</button><button class="btn" type="submit">Добавить квоту</button></form>`,true);
+      const list = document.querySelector('#compound-conditions');
+      function addCondition() {
+        if (list.children.length >= 8) return notify('Не более 8 условий',true);
+        list.insertAdjacentHTML('beforeend', `<div class="compound-row"><select class="condition-question" aria-label="Вопрос">${eligible.map(q => `<option value="${esc(q.id)}">${esc(q.label)}</option>`).join('')}</select><span class="condition-value"></span><button type="button" class="text-button condition-remove">Удалить</button></div>`);
+        const row = list.lastElementChild, show = () => {
+          const q = eligible.find(item => item.id === row.querySelector('select').value);
+          row.querySelector('.condition-value').innerHTML = q.type === 'number' ? '<span class="bounds"><input type="number" step="any" class="condition-min" placeholder="От (≥)" aria-label="От"><input type="number" step="any" class="condition-max" placeholder="До (<)" aria-label="До"></span>' : `<select class="condition-option" aria-label="Вариант">${q.options.map(option => `<option value="${esc(option)}">${esc(option)}</option>`).join('')}</select>`;
+        };
+        row.querySelector('select').onchange = show; show();
+      }
+      document.querySelector('#add-condition').onclick = addCondition;
+      list.onclick = event => { if (event.target.matches('.condition-remove') && list.children.length > 1) event.target.closest('.compound-row').remove(); };
+      document.querySelector('#compound-existing').onclick = async event => { const id = event.target.dataset.removeQuota; if (!id || !confirm('Удалить эту квоту?')) return; try { await api(`/studies/${s.id}/member-quotas/${id}`,'DELETE'); closeModal(); await refresh(); editCompound(study(s.id)); } catch (error) { notify(error.message,true); } };
+      document.querySelector('#compound-form').onsubmit = async event => {
+        event.preventDefault(); const conditions = [...list.children].map(row => { const question_id = row.querySelector('.condition-question').value; const option = row.querySelector('.condition-option'); return option ? {question_id,option:option.value} : {question_id,min:row.querySelector('.condition-min').value === '' ? null : Number(row.querySelector('.condition-min').value),max:row.querySelector('.condition-max').value === '' ? null : Number(row.querySelector('.condition-max').value)}; });
+        try { await api(`/studies/${s.id}/member-quotas`,'POST',{user_id:Number(document.querySelector('#compound-user').value),label:document.querySelector('#compound-label').value,target:Number(document.querySelector('#compound-target').value),conditions}); closeModal(); await refresh(); editCompound(study(s.id)); notify('Квота добавлена'); } catch (error) { notify(error.message,true); }
+      };
+      addCondition();
+    }
+    async function loadSurveyLink(sid) {
+      const box = document.querySelector('#survey-link'); if (!box) return;
+      try {
+        const {token} = await api(`/studies/${sid}/survey-link`);
+        if (!box.isConnected || state.selected !== sid) return;
+        const url = token ? `${location.origin}/s/${token}` : '';
+        box.innerHTML = `${url ? `<label class="field-label">Ссылка для респондентов<input readonly id="public-url" value="${esc(url)}" aria-label="Ссылка на опрос"></label><button class="btn small secondary" id="copy-public" type="button">Копировать ссылку</button> ` : '<p class="muted">Ссылка пока не создана.</p>'}<button class="btn small secondary" data-action="link-create" data-id="${sid}">${token ? 'Перевыпустить' : 'Создать ссылку'}</button> ${token ? `<button class="text-button" data-action="link-revoke" data-id="${sid}">Отключить</button>` : ''}`;
+        const copy = box.querySelector('#copy-public'); if (copy) copy.onclick = async () => { try { await navigator.clipboard.writeText(url); notify('Ссылка скопирована'); } catch { box.querySelector('#public-url').select(); notify('Выделена ссылка для копирования'); } };
+      } catch (error) { if (box.isConnected) box.textContent = error.message; }
+    }
+    async function changeSurveyLink(s, method) {
+      if (method === 'PUT' && s.questions.length === 0) return notify('Сначала создайте анкету.',true);
+      if (method === 'PUT' && document.querySelector('#public-url') && !confirm('Старая ссылка перестанет работать. Продолжить?')) return;
+      try { await api(`/studies/${s.id}/survey-link`,method); await loadSurveyLink(s.id); notify(method === 'PUT' ? 'Ссылка готова' : 'Ссылка отключена'); } catch (error) { notify(error.message,true); }
+    }
+    async function loadFocus(sid) {
+      const box = document.querySelector(state.selected === sid ? '#focus-list' : `#focus-list-${sid}`);
+      try {
+        const {sessions} = await api(`/studies/${sid}/focus`);
+        focusSessions.set(sid, sessions);
+        if (box?.isConnected) box.innerHTML = sessions.length ? sessions.map(item => `<div class="file-row"><span class="file-icon">◉</span><strong>${esc(item.title)}</strong><small>${item.audio_size ? 'Запись сохранена' : 'Без записи'} · ${date(item.created_at)}</small><button class="btn small secondary" data-action="open-focus" data-id="${sid}" data-focus="${item.id}">Открыть</button></div>`).join('') : '<p class="muted">Создайте встречу, добавьте гайд и начните запись после согласия участников.</p>';
+      } catch (error) { if (box?.isConnected) box.textContent = error.message; }
+    }
+    async function newFocus(s, guideText) {
+      if (guideText === undefined) {
+        try { guideText = isAdmin() ? (await api(`/studies/${s.id}/editor/guide`)).body : ''; }
+        catch (error) { notify(error.message,true); return; }
+      }
+      openModal('Новая фокус-группа', `<form id="focus-create" class="form-grid"><label class="field-label">Название встречи<input name="title" maxlength="180" required placeholder="Группа 1 · 12 октября"></label><label class="field-label">Гайд для модератора (каждый пункт с новой строки)<textarea name="guide" maxlength="20000" required placeholder="Представление и согласие на запись&#10;Основные вопросы&#10;Завершение">${esc(guideText)}</textarea></label><button class="btn" type="submit">Создать встречу</button></form>`,true);
+      document.querySelector('#focus-create').onsubmit = async event => { event.preventDefault(); const form = event.currentTarget; try { const {id} = await api(`/studies/${s.id}/focus`,'POST',Object.fromEntries(new FormData(form))); await loadFocus(s.id); openFocus(s,id); } catch (error) { notify(error.message,true); } };
+    }
+    function openFocus(s, id, initialTab='guide') {
+      const item = focusSessions.get(s.id)?.find(session => session.id === id);
+      if (!item) return notify('Встреча не найдена. Обновите страницу.',true);
+      const lines = item.guide.split('\n').map(line => line.trim()).filter(Boolean);
+      const editable = canManage();
+      openModal(esc(item.title), `<p class="muted">Прокручивайте гайд во время разговора. Микрофон требует HTTPS или localhost. Убедитесь в согласии всех участников на запись.</p><div class="focus-guide" id="focus-guide">${lines.map((line,i) => `<p data-step="${i}" class="${i === 0 ? 'active' : ''}"><strong>${i+1}.</strong> ${esc(line)}</p>`).join('')}</div><div class="focus-controls"><button type="button" class="btn small secondary" id="focus-prev">Назад</button><button type="button" class="btn small secondary" id="focus-next">Следующий пункт</button><span class="muted" id="focus-position">1 / ${lines.length}</span></div>${editable ? `<label class="check-label"><input type="checkbox" id="focus-consent"> Получено согласие участников на запись</label><div class="focus-controls"><button type="button" class="btn small" id="focus-start">Начать запись</button><button type="button" class="btn small secondary" id="focus-stop" disabled>Остановить</button><span id="focus-status" class="muted">${item.audio_size ? 'Запись сохранена на сервере.' : 'Записи пока нет.'}</span></div>${item.audio_size ? `<audio controls preload="none" style="width:100%" src="/api/studies/${s.id}/focus/${id}/audio"></audio><p><a class="btn small secondary" href="/api/studies/${s.id}/focus/${id}/audio" download>Скачать запись</a> <button type="button" class="btn small secondary" id="focus-transcribe">Расшифровать локально</button></p>` : ''}<div id="focus-retry"></div><label class="field-label">Расшифровка (можно исправить вручную)<textarea id="focus-transcript" maxlength="200000" style="min-height:180px">${esc(item.transcript)}</textarea></label><button type="button" class="btn small secondary" id="focus-save-text">Сохранить текст</button>` : `<p class="muted">Записывать встречу может исследователь или сотрудник, назначенный в команду проекта.</p>${item.audio_size ? `<audio controls preload="none" style="width:100%" src="/api/studies/${s.id}/focus/${id}/audio"></audio>` : ''}${item.transcript ? `<p class="description">${esc(item.transcript)}</p>` : ''}`}`,true);
+      const modal = document.querySelector('#modal');
+      const tail = [...modal.children].slice(2);
+      const transcriptStart = editable ? tail.indexOf(document.querySelector('#focus-transcript').closest('label')) : tail.findIndex(node => node.classList.contains('description'));
+      const split = transcriptStart < 0 ? tail.length : transcriptStart;
+      const panes = Object.fromEntries(['guide','record','transcript'].map(key => { const pane = document.createElement('div'); pane.className = 'focus-pane'; pane.dataset.pane = key; return [key,pane]; }));
+      panes.guide.append(...tail.slice(0,2));
+      panes.record.append(...tail.slice(2,split));
+      panes.transcript.append(...tail.slice(split));
+      if (!panes.transcript.children.length) panes.transcript.innerHTML = '<p class="muted">Расшифровка пока не готова.</p>';
+      if (editable) panes.transcript.insertAdjacentHTML('afterbegin', `<p id="focus-transcript-status" class="muted" aria-live="polite">${item.audio_size ? item.transcript ? 'Текст сохранён. Проверьте его перед использованием.' : 'Распознавание начнётся автоматически. Это может занять несколько минут.' : 'Сначала запишите встречу во вкладке «Запись».'}</p>${item.audio_size ? '<button type="button" class="btn small secondary" id="focus-transcribe-text">Повторить распознавание</button>' : ''}`);
+      const tabs = document.createElement('div');
+      tabs.className = 'focus-tabs';
+      tabs.setAttribute('aria-label','Этапы фокус-группы');
+      tabs.innerHTML = '<button type="button" data-focus-tab="guide">Гайд</button><button type="button" data-focus-tab="record">Запись</button><button type="button" data-focus-tab="transcript">Расшифровка</button>';
+      modal.append(tabs, panes.guide, panes.record, panes.transcript);
+      document.querySelector('#focus-guide').dataset.focus = String(id);
+      document.querySelector('#focus-guide').dataset.study = String(s.id);
+      if (editable) panes.guide.insertAdjacentHTML('beforeend','<button type="button" class="btn small secondary" id="focus-guide-stop" hidden>Остановить запись</button>');
+      const selectTab = key => {
+        if ((key === 'transcript' && recorder?.state === 'recording') || (key !== 'record' && pendingAudio?.sid === s.id && pendingAudio.id === id)) return notify('Сначала остановите запись и дождитесь сохранения или скачайте резервную копию.',true);
+        tabs.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed',String(button.dataset.focusTab === key)));
+        Object.entries(panes).forEach(([name,pane]) => { pane.hidden = name !== key; });
+      };
+      tabs.querySelectorAll('button').forEach(button => button.onclick = () => selectTab(button.dataset.focusTab));
+      selectTab(pendingAudio?.sid === s.id && pendingAudio.id === id ? 'record' : initialTab);
+      let step = 0;
+      const move = delta => { step = Math.max(0, Math.min(lines.length-1, step+delta)); document.querySelectorAll('#focus-guide p').forEach((p,i) => p.classList.toggle('active',i === step)); document.querySelector(`#focus-guide [data-step="${step}"]`)?.scrollIntoView({block:'nearest',behavior:'smooth'}); document.querySelector('#focus-position').textContent = `${step+1} / ${lines.length}`; };
+      document.querySelector('#focus-prev').onclick = () => move(-1);
+      document.querySelector('#focus-next').onclick = () => move(1);
+      if (!editable) return;
+      const status = document.querySelector('#focus-status'), start = document.querySelector('#focus-start'), stop = document.querySelector('#focus-stop');
+      const retry = document.querySelector('#focus-retry');
+      async function upload(blob) {
+        if (blob.size > 24*1024*1024) throw new Error('Запись превышает 24 МБ. Скачайте её и разбейте на части вне приложения.');
+        status.textContent = 'Загружаем запись на сервер…';
+        const content = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(blob); });
+        await api(`/studies/${s.id}/focus/${id}/audio`,'PUT',{mime:blob.type.split(';')[0],content});
+        pendingAudio = null; await loadFocus(s.id);
+        if (document.querySelector('#modal-layer').classList.contains('show') && document.querySelector('#focus-guide')?.dataset.focus === String(id) && document.querySelector('#focus-guide').dataset.study === String(s.id)) openFocus(s,id,'record');
+        notify('Запись сохранена');
+      }
+      function showRetry(blob) {
+        const url = URL.createObjectURL(blob);
+        retry.innerHTML = `<p class="muted">Запись не отправлена. Скачайте резервную копию или повторите загрузку.</p><a class="btn small secondary" href="${url}" download="focus-${id}.webm">Скачать запись</a> <button class="btn small secondary" id="focus-upload-retry">Повторить загрузку</button> <button class="text-button" id="focus-discard">Удалить копию на устройстве</button>`;
+        retry.querySelector('#focus-upload-retry').onclick = async () => { try { await upload(blob); URL.revokeObjectURL(url); } catch (error) { notify(error.message,true); } };
+        retry.querySelector('#focus-discard').onclick = () => { if (confirm('Удалить несохранённую запись? Перед этим скачайте копию.')) { pendingAudio = null; URL.revokeObjectURL(url); retry.innerHTML = ''; } };
+      }
+      if (pendingAudio?.sid === s.id && pendingAudio.id === id) showRetry(pendingAudio.blob);
+      start.onclick = async () => {
+        if (!document.querySelector('#focus-consent').checked) return notify('Подтвердите согласие участников на запись.',true);
+        if (pendingAudio) return notify('Сначала отправьте или скачайте несохранённую запись.',true);
+        if (item.audio_size && !confirm('Новая запись заменит текущую запись и её расшифровку. Продолжить?')) return;
+        if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return notify('Запись микрофона недоступна. Откройте приложение по HTTPS.',true);
+        if (recorder?.state === 'recording') return;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+          const mimeType = ['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(type => MediaRecorder.isTypeSupported(type));
+          recorder = new MediaRecorder(stream, mimeType ? {mimeType} : {});
+          const chunks = []; let size = 0;
+          recorder.ondataavailable = event => { if (event.data.size) { chunks.push(event.data); size += event.data.size; if (size >= 23*1024*1024 && recorder.state === 'recording') recorder.stop(); } };
+           recorder.onstop = async () => { stream.getTracks().forEach(track => track.stop()); document.querySelector('#focus-guide-stop').hidden = true; const blob = new Blob(chunks,{type:recorder.mimeType || chunks[0]?.type || 'audio/webm'}); pendingAudio = {sid:s.id,id,blob}; stop.disabled = true; start.disabled = false; status.classList.remove('recording'); try { await upload(blob); } catch (error) { status.textContent = error.message; showRetry(blob); selectTab('record'); notify(error.message,true); } };
+           recorder.start(1000); start.disabled = true; stop.disabled = false; document.querySelector('#focus-guide-stop').hidden = false; status.classList.add('recording'); status.textContent = 'Идёт запись…';
+        } catch (error) { notify('Нет доступа к микрофону: ' + error.message,true); }
+      };
+       stop.onclick = () => { if (recorder?.state === 'recording') recorder.stop(); stop.disabled = true; document.querySelector('#focus-guide-stop').hidden = true; status.textContent = 'Готовим запись…'; };
+       document.querySelector('#focus-guide-stop').onclick = () => stop.click();
+      const transcribe = document.querySelector('#focus-transcribe');
+      if (transcribe) {
+        const transcriptField = document.querySelector('#focus-transcript');
+        const transcriptStatus = document.querySelector('#focus-transcript-status');
+        const retryTranscription = document.querySelector('#focus-transcribe-text');
+        const saveTranscript = document.querySelector('#focus-save-text');
+        const job = `${s.id}:${id}`;
+        const isCurrent = () => document.querySelector('#modal-layer').classList.contains('show') && document.querySelector('#focus-guide')?.dataset.focus === String(id) && document.querySelector('#focus-guide').dataset.study === String(s.id);
+        transcribe.onclick = async () => {
+          if (transcriptionJobs.has(job)) return notify('Расшифровка уже выполняется.',true);
+          if (transcribe.disabled || transcriptField.value.trim() && !confirm('Заменить существующую расшифровку результатом распознавания?')) return;
+          transcriptionJobs.add(job);
+          transcribe.disabled = true;
+          retryTranscription.disabled = true;
+          transcriptField.disabled = true;
+          saveTranscript.disabled = true;
+          status.textContent = 'Локальное распознавание: это может занять несколько минут…';
+          transcriptStatus.textContent = status.textContent;
+          try {
+            const result = await api(`/studies/${s.id}/focus/${id}/transcribe`,'POST');
+            await loadFocus(s.id);
+            if (isCurrent()) {
+              document.querySelector('#focus-transcript').value = result.transcript;
+              document.querySelector('#focus-transcript-status').textContent = 'Расшифровка сохранена. Проверьте и исправьте ошибки распознавания.';
+              document.querySelector('#focus-status').textContent = 'Расшифровка сохранена.';
+              document.querySelector('[data-focus-tab="transcript"]').click();
+            }
+            notify('Расшифровка сохранена');
+          } catch (error) {
+            if (isCurrent()) { document.querySelector('#focus-status').textContent = error.message; document.querySelector('#focus-transcript-status').textContent = error.message; }
+            notify(error.message,true);
+          } finally {
+            transcriptionJobs.delete(job);
+            transcribe.disabled = false;
+            retryTranscription.disabled = false;
+            if (isCurrent()) { document.querySelector('#focus-transcript').disabled = false; document.querySelector('#focus-save-text').disabled = false; }
+          }
+        };
+        retryTranscription.onclick = () => transcribe.click();
+        if (!item.transcript && !transcriptionJobs.has(job)) transcribe.click();
+        if (transcriptionJobs.has(job)) {
+          transcriptStatus.textContent = 'Локальное распознавание выполняется. Это может занять несколько минут…';
+          transcriptField.disabled = true;
+          saveTranscript.disabled = true;
+        }
+      }
+      document.querySelector('#focus-save-text').onclick = async () => { try { await api(`/studies/${s.id}/focus/${id}/transcript`,'PUT',{transcript:document.querySelector('#focus-transcript').value}); await loadFocus(s.id); notify('Текст сохранён'); } catch (error) { notify(error.message,true); } };
+    }
+    async function renderPublic() {
+      const token = location.pathname.split('/')[2];
+      app.innerHTML = '<main class="public-wrap"><h1>Онлайн-опрос</h1><p class="muted">Загружаем анкету…</p></main>';
+      try {
+        const survey = await api(`/public/${token}`);
+        app.innerHTML = `<main class="public-wrap"><div class="eyebrow">НИЛ «МЛСИ» · Анонимная анкета</div><h1>${esc(survey.title)}</h1><p class="lead">Ответьте на вопросы и отправьте анкету. Вход в систему не нужен. Не указывайте персональные данные без необходимости.</p><section class="box"><form id="public-form" class="form-grid">${survey.questions.map((q,i) => `<div class="survey-item"><strong>${i+1}. ${esc(q.label)}${q.required ? ' *' : ''}</strong>${q.type === 'single' || q.type === 'multiple' ? q.options.map(option => `<label class="survey-choice"><input type="${q.type === 'single' ? 'radio' : 'checkbox'}" name="${esc(q.id)}" value="${esc(option)}">${esc(option)}</label>`).join('') : q.type === 'textarea' ? `<textarea name="${esc(q.id)}" maxlength="2000" ${q.required ? 'required' : ''}></textarea>` : `<input name="${esc(q.id)}" type="${q.type === 'number' ? 'number' : 'text'}" ${q.type === 'number' ? 'step="any"' : ''} maxlength="2000" ${q.required ? 'required' : ''}>`}</div>`).join('')}<button class="btn" type="submit">Отправить ответы</button></form></section></main>`;
+        let id = null;
+        document.querySelector('#public-form').onsubmit = async event => {
+          event.preventDefault(); const form = event.currentTarget, data = new FormData(form), answers = {};
+          for (const q of survey.questions) answers[q.id] = q.type === 'multiple' ? data.getAll(q.id) : data.get(q.id) || '';
+          if (survey.questions.some(q => q.required && !answers[q.id].length)) return notify('Ответьте на обязательные вопросы.',true);
+          id ||= crypto.randomUUID(); const button = form.querySelector('button'); button.disabled = true;
+          try { await api(`/public/${token}`,'POST',{client_id:id,answers}); app.innerHTML = '<main class="public-wrap"><section class="box"><h1>Спасибо за участие!</h1><p class="lead">Ответы сохранены. Можно закрыть страницу.</p></section></main>'; }
+          catch (error) { notify(error.message,true); button.disabled = false; }
+        };
+      } catch (error) { app.innerHTML = `<main class="public-wrap"><section class="box"><h1>Анкета недоступна</h1><p class="muted">${esc(error.message)}</p></section></main>`; }
+    }
+    async function loadMessages(studyId) {
+      const container = document.querySelector('#chat-messages'); if (!container || state.offline) return;
+      try {
+        const {messages} = await api(`/studies/${studyId}/messages`);
+        if (!container.isConnected || state.selected !== studyId) return;
+        const last = messages.at(-1)?.id || 0;
+        if (container.dataset.last === String(last) && container.dataset.count === String(messages.length)) return;
+        container.innerHTML = messages.length ? messages.map(message => `<article class="chat-message ${message.author_id === state.user.id ? 'own' : ''}"><header><strong>${esc(message.author)}</strong><time>${new Date(message.created_at).toLocaleString('ru-RU')}</time></header><p>${esc(message.body)}</p></article>`).join('') : '<p class="muted">Пока сообщений нет. Начните обсуждение исследования.</p>';
+        container.dataset.last = String(last); container.dataset.count = String(messages.length);
+        container.scrollTop = container.scrollHeight;
+      } catch (error) { if (container.isConnected && state.selected === studyId) container.innerHTML = `<p class="muted">Чат недоступен: ${esc(error.message)}</p>`; }
+    }
+    async function sendMessage(event, studyId) {
+      event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button'), body = form.elements.body.value.trim();
+      if (!body) return; button.disabled = true;
+      try { await api(`/studies/${studyId}/messages`,'POST',{body}); form.reset(); await loadMessages(studyId); }
+      catch (error) { notify(error.message,true); }
+      finally { button.disabled = false; }
+    }
+    async function uploadFile(event) {
+      event.preventDefault(); const form = event.currentTarget, file = form.elements.file.files[0]; if (!file) return; if (file.size > 5*1024*1024) { notify('Максимальный размер файла — 5 МБ',true); return; }
+      const button = form.querySelector('button'); button.disabled = true;
+      try { const content = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); }); await api('/studies/'+form.dataset.id+'/files','POST',{name:file.name,kind:form.elements.kind.value,content}); await refresh(); notify('Файл загружен'); } catch (error) { notify(error.message,true); button.disabled = false; }
+    }
+    async function importExcel(event, studyId) {
+      const file = event.target.files[0]; if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.xlsx') || file.size > 5*1024*1024) { notify('Нужен файл .xlsx размером до 5 МБ',true); return; }
+      event.target.disabled = true;
+      try {
+        const content = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
+        const result = await api('/studies/'+studyId+'/import','POST',{ name:file.name, content });
+        await refresh(); notify(`Импортировано анкет: ${result.imported}`);
+      } catch (error) { notify(error.message,true); event.target.disabled = false; event.target.value = ''; }
+    }
+    async function loadReport(studyId) {
+      const container = document.querySelector('#report-content');
+      try {
+        const report = await api('/studies/'+studyId+'/report');
+        if (!container.isConnected || state.selected !== studyId) return;
+        const fmt = value => Number(value).toLocaleString('ru-RU',{maximumFractionDigits:2});
+        const metrics = [['Анкет',report.count],['Полевой / ссылка / Excel',`${report.online_count} / ${report.public_count} / ${report.excel_count}`],['Сумма весов',fmt(report.total_weight)]];
+        container.innerHTML = `<div class="report-grid">${metrics.map(([label,value]) => `<div class="report-metric"><span class="muted">${label}</span><strong>${value}</strong></div>`).join('')}</div><p class="muted">Доля рассчитывается от суммы весов ответивших на конкретный вопрос. В вопросах с несколькими вариантами сумма долей может превышать 100%.</p>${report.questions.length ? report.questions.map((q,i) => `<section class="report-question"><h3>${i+1}. ${esc(q.label)}</h3><p class="muted" style="margin:0">Ответили: ${q.answered} · Взвешенная база: ${fmt(q.weighted_base)}${q.mean !== null ? ` · Взвешенное среднее: ${fmt(q.mean)}` : ''}</p><p class="muted">${esc(q.analysis)}</p>${q.rows.length && q.answered ? `<div class="report-chart" role="img" aria-label="Распределение ответов на вопрос ${esc(q.label)}">${q.rows.map(row => `<div class="report-bar-row"><span class="report-bar-label">${esc(row.label)}</span><span class="report-bar-track"><span class="report-bar-fill" style="width:${row.percent}%"></span></span><span class="report-bar-value">${fmt(row.percent)}%</span></div>`).join('')}</div>` : ''}${q.rows.length ? `<table class="report-table"><thead><tr><th>${q.type === 'number' ? 'Диапазон' : 'Ответ'}</th><th>Анкет</th><th>Взвешенно</th><th>Доля</th></tr></thead><tbody>${q.rows.map(row => `<tr><td>${esc(row.label)}</td><td>${row.count}</td><td>${fmt(row.weighted_count)}</td><td>${fmt(row.percent)}%</td></tr>`).join('')}</tbody></table>` : ''}</section>`).join('') : '<p class="muted">Пока нет анкеты. Загрузите Excel или создайте вопросы.</p>'}`;
+        container.querySelector('.report-grid').insertAdjacentHTML('beforeend', `<div class="report-metric"><span class="muted">Отказов</span><strong>${report.refusal_count}</strong></div>`);
+         if (report.weighting_questions.length) {
+          container.insertAdjacentHTML('afterbegin', `<form class="weighting-form" id="weighting-form"><div class="box-title"><h2>Взвешивание отчёта</h2></div><p class="muted">Выберите вопрос с одним вариантом ответа и укажите коэффициенты для групп. Сохранённые веса анкет умножаются на коэффициенты; без ответа применяется 1.</p><label class="field-label" for="weight-question">Переменная для взвешивания</label><select id="weight-question"><option value="">Без группового взвешивания</option>${report.weighting_questions.map(q => `<option value="${esc(q.id)}" ${report.weighting?.question_id === q.id ? 'selected' : ''}>${esc(q.label)}</option>`).join('')}</select><div class="weighting-options" id="weight-options"></div><button class="btn small" type="submit">Применить к отчёту</button></form>`);
+          const form = container.querySelector('#weighting-form'), select = form.querySelector('#weight-question');
+          const showOptions = () => { const q = report.weighting_questions.find(item => item.id === select.value); form.querySelector('#weight-options').innerHTML = q ? q.options.map(option => `<label class="weighting-row"><span>${esc(option)}</span><input type="number" min="0.001" max="1000" step="any" required data-option="${esc(option)}" value="${report.weighting?.question_id === q.id ? report.weighting.coefficients[option] : 1}"></label>`).join('') : ''; };
+          select.onchange = showOptions; showOptions();
+           form.onsubmit = async event => { event.preventDefault(); const coefficients = Object.fromEntries([...form.querySelectorAll('[data-option]')].map(input => [input.dataset.option,input.value])); try { await api('/studies/'+studyId+'/weighting','PUT',{question_id:select.value || null,coefficients}); await loadReport(studyId); notify('Веса отчёта обновлены'); } catch (error) { notify(error.message,true); } };
+         }
+         if (report.association_questions.length >= 2) {
+           const choices = report.association_questions.map(q => `<option value="${esc(q.id)}">${esc(q.label)} (${q.type === 'number' ? 'число' : 'вариант'})</option>`).join('');
+           container.insertAdjacentHTML('beforeend', `<section class="report-question"><h2>Связь переменных</h2><p class="muted">Выберите два разных вопроса. Расчёт основан на полных парах ответов с учётом весов отчёта; связь не доказывает причинность.</p><form id="association-form" class="form-grid"><div class="form-two"><div><label class="field-label" for="association-x">Первый вопрос</label><select id="association-x"><option value="">Не выбран</option>${choices}</select></div><div><label class="field-label" for="association-y">Второй вопрос</label><select id="association-y"><option value="">Не выбран</option>${choices}</select></div></div><button class="btn small" type="submit">Рассчитать связь</button></form><div id="association-result"></div></section>`);
+           const form = container.querySelector('#association-form');
+           form.querySelector('#association-x').value = report.association?.x_id || '';
+           form.querySelector('#association-y').value = report.association?.y_id || '';
+           form.onsubmit = async event => {
+             event.preventDefault(); const x_id = form.querySelector('#association-x').value, y_id = form.querySelector('#association-y').value;
+             if ((x_id && !y_id) || (!x_id && y_id) || (x_id && x_id === y_id)) return notify('Выберите два разных вопроса или очистите оба поля.',true);
+             try { await api(`/studies/${studyId}/associations`,'PUT',{x_id:x_id || null,y_id:y_id || null}); await loadReport(studyId); notify('Анализ связи обновлён'); } catch (error) { notify(error.message,true); }
+           };
+           const a = report.association;
+           if (a) {
+             const details = a.method === 'V Крамера' ? `<div style="overflow-x:auto"><table class="report-table"><thead><tr><th>${esc(a.x_label)} / ${esc(a.y_label)}</th>${a.columns.map(label => `<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>${a.details.map(row => `<tr><td>${esc(row.label)}</td>${row.values.map(value => `<td>${fmt(value)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : a.method === 'Отношение корреляции η' ? `<table class="report-table"><thead><tr><th>Группа</th><th>Анкет</th><th>Взвешенно</th><th>Среднее</th></tr></thead><tbody>${a.details.map(row => `<tr><td>${esc(row.label)}</td><td>${row.count}</td><td>${fmt(row.weighted_base)}</td><td>${row.mean === null ? '—' : fmt(row.mean)}</td></tr>`).join('')}</tbody></table>` : '';
+             container.querySelector('#association-result').innerHTML = `<p class="muted" style="margin:15px 0 0">${esc(a.analysis)} Взвешенная база: ${fmt(a.weighted_base)}.</p>${details}`;
+           }
+         }
+         container.insertAdjacentHTML('beforeend', `<section class="report-question"><h2>Итоговые аналитические выводы</h2>${report.summary.map(line => `<p class="muted">${esc(line)}</p>`).join('')}</section>`);
+      } catch (error) { if (container.isConnected) container.innerHTML = `<p class="muted">Не удалось загрузить отчёт: ${esc(error.message)}</p>`; }
+    }
+    async function loadAnalyticalReport(studyId) {
+      const container = document.querySelector('#analytical-content');
+      if (!container) return;
+      try {
+        const result = await api(`/studies/${studyId}/analytical-report`);
+        if (!container.isConnected || state.selected !== studyId) return;
+        const report = result.report;
+        container.innerHTML = report ? `<p class="muted">Создано: ${esc(new Date(report.generated_at).toLocaleString('ru-RU'))}. Основа: ${report.snapshot.count} анкет, ${report.snapshot.questions.length} вопросов.</p>${report.snapshot.questions.length ? '' : '<p class="muted">Вопросы отсутствовали на момент формирования отчёта.</p>'}${report.stale ? '<p style="color:#a34a25"><strong>Данные изменились после генерации.</strong> Обновите записку перед передачей.</p>' : ''}<a class="btn small secondary" href="/api/studies/${studyId}/analytical-report.pdf">Скачать аналитический отчёт PDF ↓</a><div class="analytical-body">${report.content.split(/\n\s*\n/).map(block => `<p>${esc(block).replace(/\n/g,'<br>')}</p>`).join('')}</div>` : '<p class="muted">Записка ещё не создана. Сначала соберите не менее 10 анкет, затем нажмите «Сформировать с ИИ».</p>';
+      } catch (error) { if (container.isConnected) container.innerHTML = `<p class="muted">Не удалось загрузить записку: ${esc(error.message)}</p>`; }
+    }
+    async function generateAnalyticalReport(studyId, button) {
+      if (!confirm('Отправить обезличенные агрегированные показатели в DeepSeek для создания аналитической записки? Существующая записка будет заменена.')) return;
+      button.disabled = true; button.textContent = 'Формируем записку…';
+      try {
+        await api(`/studies/${studyId}/analytical-report`, 'POST', {});
+        await loadAnalyticalReport(studyId);
+        notify('Аналитическая записка сохранена');
+      } catch (error) { notify(error.message, true); }
+      finally { if (button.isConnected) { button.disabled = false; button.textContent = 'Сформировать с ИИ'; } }
+    }
+    function questionBlock(q={ type:'text', label:'', options:[], required:false }) {
+      return `<div class="question-edit"><div class="question-top"><strong>ВОПРОС</strong><button type="button" class="text-button remove-question">Удалить</button></div><div class="form-two"><div><label class="field-label">Формулировка *</label><input class="q-label" required maxlength="250" value="${esc(q.label)}" placeholder="Ваш вопрос"></div><div><label class="field-label">Тип ответа</label><select class="q-type">${Object.entries(types).map(([key,label]) => `<option value="${key}" ${q.type === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><div class="q-options-wrap" style="${['single','multiple'].includes(q.type) ? '' : 'display:none'}"><label class="field-label">Варианты ответа (по одному на строке)</label><textarea class="q-options" placeholder="Да&#10;Нет&#10;Затрудняюсь ответить">${esc(q.options.join('\n'))}</textarea></div><label class="check-label"><input class="q-required" type="checkbox" ${q.required ? 'checked' : ''}> Обязательный вопрос</label></div>`;
+    }
+    function editQuestions(s, draft=s.questions) {
+      openModal('Анкета исследования',`<p class="muted">Проверьте типы вопросов, варианты ответа и обязательность перед сохранением. После сбора ответов или настройки квот изменение действующей анкеты запрещено. До 40 вопросов.</p><div id="question-list">${draft.map(questionBlock).join('')}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small secondary" id="add-question">+ Добавить вопрос</button><label class="btn small secondary" style="cursor:pointer">Импорт JSON <input id="import-questions" type="file" accept=".json,application/json" hidden></label></div><div class="actions"><button type="button" class="btn secondary" id="cancel">Отмена</button><button type="button" class="btn" id="save-questions">Сохранить анкету</button></div>`,true);
+      const list = document.querySelector('#question-list');
+      document.querySelector('#cancel').onclick = closeModal;
+      document.querySelector('#add-question').onclick = () => { if (list.children.length >= 40) { notify('Не более 40 вопросов',true); return; } list.insertAdjacentHTML('beforeend',questionBlock()); };
+      list.onchange = event => { if (event.target.classList.contains('q-type')) event.target.closest('.question-edit').querySelector('.q-options-wrap').style.display = ['single','multiple'].includes(event.target.value) ? '' : 'none'; };
+      list.onclick = event => { if (event.target.classList.contains('remove-question')) event.target.closest('.question-edit').remove(); };
+      document.querySelector('#import-questions').onchange = async event => { const file = event.target.files[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const questions = Array.isArray(data) ? data : data.questions; if (!Array.isArray(questions) || questions.length > 40 || questions.some(q => !q || typeof q.label !== 'string' || !types[q.type] || !Array.isArray(q.options || []))) throw new Error('Неверный формат файла'); list.innerHTML = questions.map(q => questionBlock({ ...q, options:q.options || [] })).join(''); notify('Анкета импортирована. Нажмите «Сохранить анкету».'); } catch (error) { notify(error.message,true); } };
+      document.querySelector('#save-questions').onclick = async () => { const questions = [...list.children].map(item => ({ label:item.querySelector('.q-label').value.trim(), type:item.querySelector('.q-type').value, options:item.querySelector('.q-options').value.split('\n').map(v=>v.trim()).filter(Boolean), required:item.querySelector('.q-required').checked })); if (questions.some(q => !q.label)) { notify('Заполните формулировки вопросов',true); return; } try { await api('/studies/'+s.id+'/questionnaire','POST',{questions}); closeModal(); await refresh(); notify('Анкета сохранена'); } catch (error) { notify(error.message,true); } };
+    }
+    function openSurvey(s) {
+      if (!s.questions.length) return;
+      openModal('Опрос: '+esc(s.title),`<p class="muted">Ответы сохраняются в проекте. Рекомендуем использовать обезличенный код респондента.</p><form id="survey-form" class="form-grid" data-id="${s.id}"><div><label class="field-label">Код респондента (необязательно)</label><input name="code" maxlength="80" placeholder="Например: Р-001" autocomplete="off"></div>${s.questions.map((q,i) => `<div class="survey-item"><strong>${i+1}. ${esc(q.label)} ${q.required ? '<span style="color:var(--orange)">*</span>' : ''}</strong>${q.type === 'single' || q.type === 'multiple' ? q.options.map(option => `<label class="survey-choice"><input type="${q.type === 'single' ? 'radio' : 'checkbox'}" name="${q.id}" value="${esc(option)}">${esc(option)}</label>`).join('') : q.type === 'textarea' ? `<textarea name="${q.id}" ${q.required ? 'required' : ''} maxlength="2000" placeholder="Введите ответ"></textarea>` : `<input name="${q.id}" type="${q.type === 'number' ? 'number' : 'text'}" ${q.type === 'number' ? 'step="any"' : ''} ${q.required ? 'required' : ''} maxlength="2000" placeholder="Введите ответ">`}</div>`).join('')}<div class="actions"><button type="button" class="btn secondary" id="cancel">Отмена</button><button type="submit" class="btn orange">Сохранить ответ →</button></div></form>`,true);
+      document.querySelector('#survey-form .actions').insertAdjacentHTML('afterbegin','<button type="button" class="btn secondary" id="record-refusal">Отказ</button>');
+      document.querySelector('#record-refusal').onclick = async event => {
+        if (!confirm('Зарегистрировать отказ без сохранения заполненной анкеты?')) return;
+        const button = event.currentTarget; button.disabled = true;
+        try { await queueSurvey(s,'refusal',{}); closeModal(); notify('Отказ сохранён на устройстве. Синхронизация произойдёт при доступе к серверу.'); }
+        catch (error) { notify(`Отказ не сохранён: ${error.message}`,true); button.disabled = false; }
+      };
+      document.querySelector('#cancel').onclick = closeModal;
+      document.querySelector('#survey-form').onsubmit = submitSurvey;
+    }
+    async function submitSurvey(event) {
+      event.preventDefault(); const form = event.currentTarget, s = study(form.dataset.id), data = new FormData(form), answers = {};
+      for (const q of s.questions) answers[q.id] = q.type === 'multiple' ? data.getAll(q.id) : data.get(q.id) || '';
+      if (s.questions.some(q => q.required && !answers[q.id].length)) { notify('Ответьте на все обязательные вопросы.',true); return; }
+      const button = form.querySelector('[type="submit"]'); button.disabled = true;
+      try { await queueSurvey(s,'response',{code:data.get('code') || '',answers}); notify('Анкета сохранена на устройстве. Она отправится при доступе к серверу.'); openSurvey(s); }
+      catch (error) { notify(`Анкета не сохранена: ${error.message}`,true); button.disabled = false; }
+    }
+    boot();
+  </script>
+</body>
+</html>
