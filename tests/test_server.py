@@ -29,7 +29,7 @@ class PlannerTest(unittest.TestCase):
         key_file_patch.start()
         self.addCleanup(key_file_patch.stop)
         self.db_path = Path(self.temp.name) / "lab.db"
-        self.server = create_server(self.db_path, port=0)
+        self.server = create_server(self.db_path, port=0, seed_demo=False)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -77,6 +77,39 @@ class PlannerTest(unittest.TestCase):
         init_db(path)
         with closing(sqlite3.connect(path)) as db:
             self.assertEqual(db.execute("SELECT goal, tasks FROM studies WHERE id = 1").fetchone(), ("", ""))
+
+    def test_demo_study_is_seeded_once_and_has_385_fictional_responses(self):
+        self.server.RequestHandlerClass.demo_enabled = True
+        self.assertTrue(self.request(self.admin, "/session")[1]["setup"])
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        studies = self.request(self.admin, "/studies")[1]["studies"]
+        self.assertEqual(len(studies), 1)
+        demo = studies[0]
+        self.assertIn("ДЕМО · Warhammer 40,000", demo["title"])
+        self.assertEqual(demo["response_count"], 385)
+        self.assertEqual(len(demo["questions"]), 10)
+        sid = demo["id"]
+        report = self.request(self.admin, f"/studies/{sid}/report")[1]
+        self.assertEqual(report["count"], 385)
+        self.assertEqual(report["excel_count"], 385)
+        self.assertGreater(len(report["questions"][3]["rows"]), 1)
+        self.assertEqual(self.request(self.admin, f"/studies/{sid}", "DELETE")[0], 409)
+        with closing(sqlite3.connect(self.db_path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM responses WHERE study_id = ?", (sid,)).fetchone()[0], 385)
+        restart = create_server(self.db_path, port=0)
+        restart.server_close()
+        self.assertEqual(len(self.request(self.admin, "/studies")[1]["studies"]), 1)
+        self.assertEqual(self.request(self.admin, f"/studies/{sid}/report")[1]["count"], 385)
+
+    def test_demo_is_added_to_existing_database_on_startup(self):
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        own = self.request(self.admin, "/studies", "POST", {"title": "Моё исследование"})[1]["id"]
+        restarted = create_server(self.db_path, port=0)
+        restarted.server_close()
+        studies = self.request(self.admin, "/studies")[1]["studies"]
+        self.assertEqual(len(studies), 2)
+        self.assertEqual(next(s for s in studies if s["id"] == own)["title"], "Моё исследование")
+        self.assertEqual(next(s for s in studies if s["id"] != own)["response_count"], 385)
 
     def test_role_boundaries_and_study_deletion(self):
         self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})

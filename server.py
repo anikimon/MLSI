@@ -22,6 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
+from demo_study import ensure_demo_study
 from reports import analytical_pdf_bytes, analytical_snapshot, build_member_quotas, build_quotas, build_report, parse_weight, pdf_bytes, read_excel
 from presentations import deck_from_outline, pptx_bytes, validate_colors, validate_deck
 
@@ -180,6 +181,9 @@ def init_db(path):
                 study_id INTEGER PRIMARY KEY REFERENCES studies(id),
                 deck TEXT NOT NULL, report_digest TEXT NOT NULL, updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS demo_study (
+                id INTEGER PRIMARY KEY CHECK(id = 1), study_id INTEGER NOT NULL UNIQUE REFERENCES studies(id)
+            );
             CREATE TABLE IF NOT EXISTS calendar_tasks (
                 id INTEGER PRIMARY KEY, study_id INTEGER REFERENCES studies(id),
                 title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
@@ -311,6 +315,7 @@ def normalize_answers(questions, answers):
 
 class Handler(BaseHTTPRequestHandler):
     db_path = None
+    demo_enabled = True
     failed_logins = {}
     login_lock = threading.Lock()
     ai_requests = {}
@@ -437,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(409, "Администратор уже создан")
             cursor = db.execute("INSERT INTO users (name, email, password, role, created_at) VALUES (?, ?, ?, 'admin', ?)", (name, email, password_hash(password), now()))
             cookie = self.create_session(db, cursor.lastrowid)
+            if self.demo_enabled:
+                ensure_demo_study(db)
             self.send_json(201, {"ok": True}, {"Set-Cookie": cookie})
             return
         if path == "/api/login" and method == "POST":
@@ -869,6 +876,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if action is None and method == "DELETE":
             self.require(db, {"admin"})
+            if db.execute("SELECT 1 FROM demo_study WHERE study_id = ?", (study_id,)).fetchone():
+                raise ApiError(409, "Демонстрационное исследование сохраняется для проверки функций приложения")
             db.execute("UPDATE calendar_tasks SET study_id = NULL WHERE study_id = ?", (study_id,))
             for table in ("files", "questionnaires", "responses", "refusals", "weighting", "submissions",
                           "study_messages", "study_quotas", "study_associations", "study_members", "member_quotas",
@@ -1306,16 +1315,26 @@ class Handler(BaseHTTPRequestHandler):
         return title, description, goal, tasks, due_date, responsible_id
 
 
-def create_server(path=None, host="127.0.0.1", port=8000):
+def create_server(path=None, host="127.0.0.1", port=8000, seed_demo=True):
     db_path = str(Path(path or ROOT / "data" / "lab.db").resolve())
     init_db(db_path)
-    handler = type("LabHandler", (Handler,), {"db_path": db_path, "failed_logins": {}, "login_lock": threading.Lock(),
+    if seed_demo:
+        db = connect(db_path)
+        try:
+            with db:
+                db.execute("BEGIN IMMEDIATE")
+                ensure_demo_study(db)
+        finally:
+            db.close()
+    handler = type("LabHandler", (Handler,), {"db_path": db_path, "demo_enabled": seed_demo,
+                                                "failed_logins": {}, "login_lock": threading.Lock(),
                                                 "ai_requests": {}, "report_requests": {}, "presentation_requests": {}, "ai_lock": threading.Lock()})
     return ThreadingHTTPServer((host, port), handler)
 
 
 if __name__ == "__main__":
-    server = create_server(os.getenv("LAB_DB"), os.getenv("HOST", "127.0.0.1"), int(os.getenv("PORT", "8000")))
+    server = create_server(os.getenv("LAB_DB"), os.getenv("HOST", "127.0.0.1"), int(os.getenv("PORT", "8000")),
+                           seed_demo=os.getenv("LAB_DEMO_STUDY", "1") != "0")
     print(f"Откройте http://{server.server_address[0]}:{server.server_address[1]}")
     try:
         server.serve_forever()
