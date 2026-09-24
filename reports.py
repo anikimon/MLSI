@@ -380,11 +380,14 @@ def analytical_snapshot(report):
 
 
 def analytical_pdf_bytes(saved):
-    candidates = [os.getenv("PDF_TIMES_FONT", ""), "C:/Windows/Fonts/times.ttf",
-                  "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf"]
+    candidates = [os.getenv("PDF_TIMES_FONT", ""), os.getenv("PDF_FONT", ""),
+                  "C:/Windows/Fonts/times.ttf", "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf",
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+                  "/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf",
+                  "/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf"]
     font = next((path for path in candidates if path and Path(path).is_file()), None)
     if not font:
-        raise ValueError("Для аналитического PDF установите Times New Roman или укажите PDF_TIMES_FONT")
+        raise ValueError("Для аналитического PDF нужен TTF-шрифт с кириллицей: укажите PDF_TIMES_FONT")
     pdfmetrics.registerFont(TTFont("ReportTimes", font))
     output = io.BytesIO()
     document = SimpleDocTemplate(output, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,
