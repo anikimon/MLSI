@@ -495,10 +495,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def create_session(self, db, user_id):
         token = secrets.token_urlsafe(32)
-        expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat(timespec="seconds")
+        expires = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(timespec="seconds")
         db.execute("INSERT INTO sessions VALUES (?, ?, ?)", (hashlib.sha256(token.encode()).hexdigest(), user_id, expires))
         secure = "; Secure" if os.getenv("COOKIE_SECURE", "1" if os.getenv("AMVERA") == "1" else "0") == "1" else ""
-        return f"lab_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=1209600{secure}"
+        return f"lab_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000{secure}"
 
     def handle_request(self):
         path = urlsplit(self.path).path

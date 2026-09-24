@@ -321,7 +321,7 @@
       syncing = true;
       try {
         const session = await api('/session');
-        if (!session.user) { await store('cache','readwrite', items => items.delete('current')); state.user = null; renderAuth(false); notify('Срок входа истёк. Войдите снова, чтобы отправить очередь.',true); return; }
+        if (!session.user) { state.offline = true; return; }
         if (session.user.id !== state.user.id) { state.user = session.user; await refresh(); notify('Для отправки очереди войдите под пользователем, который собрал данные.',true); return; }
         const events = (await queued()).filter(item => item.userId === session.user.id);
         for (const item of events) {
