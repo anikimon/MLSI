@@ -455,7 +455,7 @@ class Handler(BaseHTTPRequestHandler):
         token = secrets.token_urlsafe(32)
         expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat(timespec="seconds")
         db.execute("INSERT INTO sessions VALUES (?, ?, ?)", (hashlib.sha256(token.encode()).hexdigest(), user_id, expires))
-        secure = "; Secure" if os.getenv("COOKIE_SECURE") == "1" else ""
+        secure = "; Secure" if os.getenv("COOKIE_SECURE", "1" if os.getenv("AMVERA") == "1" else "0") == "1" else ""
         return f"lab_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=1209600{secure}"
 
     def handle_request(self):
@@ -1535,7 +1535,9 @@ def create_server(path=None, host="127.0.0.1", port=8000, seed_demo=True):
 
 
 if __name__ == "__main__":
-    server = create_server(os.getenv("LAB_DB"), os.getenv("HOST", "127.0.0.1"), int(os.getenv("PORT", "8000")),
+    amvera = os.getenv("AMVERA") == "1"
+    server = create_server(os.getenv("LAB_DB") or ("/data/lab.db" if amvera else None),
+                           os.getenv("HOST", "0.0.0.0" if amvera else "127.0.0.1"), int(os.getenv("PORT", "8000")),
                            seed_demo=os.getenv("LAB_DEMO_STUDY", "1") != "0")
     print(f"Откройте http://{server.server_address[0]}:{server.server_address[1]}")
     try:

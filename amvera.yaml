@@ -1,0 +1,10 @@
+meta:
+  environment: python
+  toolchain:
+    name: pip
+    version: '3.11'
+
+run:
+  scriptName: server.py
+  containerPort: 8000
+  persistenceMount: /data
