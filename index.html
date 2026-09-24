@@ -160,9 +160,23 @@
     .report-section { margin-top:18px; }
     .analytical-body { margin-top:18px; padding:22px; border:1px solid var(--line); border-radius:10px; background:#f9fbfc; overflow-wrap:anywhere; line-height:1.5; font:14pt/1.5 "Times New Roman",Times,serif; text-align:justify; }
     .analytical-body p { text-indent:1.25cm; margin:0 0 1em; }
-    .slide-stage { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; border:1px solid var(--line); border-radius:9px; }
-    .slide-element { position:absolute; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; cursor:grab; touch-action:none; font-size:clamp(10px,1.5vw,18px); line-height:1.3; user-select:none; }
-    .slide-element.title { font-size:clamp(14px,2.3vw,29px); font-weight:700; }
+    .slide-stage { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; border:1px solid var(--line); border-radius:12px; box-shadow:0 18px 42px #152e4326; }
+    .slide-element { position:absolute; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; cursor:grab; touch-action:none; font-size:clamp(10px,1.5vw,18px); line-height:1.32; user-select:none; }
+    .slide-element.title { font-size:clamp(14px,2.3vw,29px); font-weight:700; line-height:1.12; }
+    .slide-element.body { line-height:1.48; }
+    .slide-element.tag { letter-spacing:.12em; text-transform:uppercase; }
+    .slide-element.callout { line-height:1.25; }
+    .slide-decoration { position:absolute; pointer-events:none; }
+    .slide-decoration.card { left:7%; top:34%; width:86%; height:56%; border-radius:18px; }
+    .slide-decoration.stripe { left:7%; top:34%; width:.7%; height:56%; }
+    .slide-decoration.cover-stripe { left:7%; top:23%; width:.7%; height:53%; }
+    .slide-decoration.cover-orb { left:70%; top:-18%; width:50%; height:89%; border-radius:50%; }
+    .slide-decoration.cover-orb-inner { left:80%; top:3%; width:30%; height:54%; border-radius:50%; }
+    .slide-decoration.dot { left:91%; top:8%; width:3%; aspect-ratio:1; border-radius:50%; }
+    .slide-decoration.pill { left:8%; top:4%; width:46%; height:8%; border-radius:100px; }
+    .slide-decoration.callout-card { left:9%; top:76%; width:82%; height:13%; border-radius:12px; }
+    .slide-decoration.rule { left:9%; top:92%; width:82%; height:.25%; }
+    .slide-page { position:absolute; right:6%; bottom:3%; font:600 10px Aptos,sans-serif; letter-spacing:.12em; pointer-events:none; }
     .slide-element.selected { outline:2px dashed currentColor; outline-offset:2px; }
     .slide-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
     .slide-tools select { width:auto; }
@@ -385,7 +399,7 @@
       if (calendarView && !state.offline) loadCalendar();
       if (state.selected != null && canManage()) {
         const s = study(state.selected);
-         if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section><section class="box report-section"><div class="box-title"><h2>Презентация по записке</h2></div><p class="muted">Сначала сформируйте аналитическую записку. Опишите желаемые акценты, задайте число слайдов и цвета; после генерации редактируйте текст и перетаскивайте блоки мышью или касанием. Сохраните правки перед скачиванием PPTX.</p><div class="slide-tools"><label class="btn small secondary" style="cursor:pointer">Добавить PPTX-образец <input id="presentation-template" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden></label><span id="presentation-template-status" class="muted">Проверяем образец…</span></div><p class="muted">Образец (до 5 МБ) задаёт шрифты, цвета, фон и расположение текста; картинки, анимация и текст образца не копируются. Загрузите его до генерации.</p><form id="presentation-form" class="form-grid"><div><label class="field-label" for="presentation-prompt">Пожелания к презентации</label><textarea id="presentation-prompt" maxlength="2000" placeholder="Например: акцентируй выводы по вопросам и ограничения исследования"></textarea></div><div class="presentation-fields"><div><label class="field-label" for="presentation-count">Слайдов (3–20)</label><input id="presentation-count" type="number" min="3" max="20" value="6" required></div><div><label class="field-label" for="presentation-background">Фон</label><input id="presentation-background" type="color" value="#ffffff"></div><div><label class="field-label" for="presentation-text">Текст</label><input id="presentation-text" type="color" value="#193a54"></div><div><label class="field-label" for="presentation-accent">Акцент</label><input id="presentation-accent" type="color" value="#14527c"></div></div><button class="btn small" type="submit">Сформировать презентацию с ИИ</button></form><div id="presentation-content" aria-live="polite">Загружаем презентацию…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); loadPresentation(s.id).then(() => loadPresentationTemplate(s.id)); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(s.id, event.currentTarget); document.querySelector('#presentation-form').onsubmit = event => generatePresentation(event,s.id); document.querySelector('#presentation-template').onchange = event => uploadPresentationTemplate(event,s.id); }
+         if (s) { document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="box report-section"><div class="box-title"><h2>Отчёт и данные</h2><a class="btn small secondary" href="/api/studies/${s.id}/report.pdf">Скачать PDF ↓</a></div><div style="margin-bottom:18px"><label class="btn small secondary" style="cursor:pointer">Загрузить ответы Excel <input id="excel-import" type="file" accept=".xlsx" hidden></label><p class="muted" style="margin:11px 0 0">Первая строка: названия вопросов (или q1, q2…), столбцы code и weight необязательны. До 5 МБ и 10 000 анкет. Повторный импорт добавляет строки повторно.</p></div><div id="report-content" aria-live="polite"><p class="muted">Формируем отчёт…</p></div></section><section class="box report-section"><div class="box-title"><h2>Аналитическая записка</h2><button type="button" class="btn small" id="analytical-generate">Сформировать с ИИ</button></div><p class="muted">Для передачи руководству или ведомству. При генерации в DeepSeek отправляются только агрегированные данные; свободный текст, персональные ответы и категории менее пяти анкет исключаются. Нужно не менее 10 анкет. Проверьте выводы перед передачей.</p><div id="analytical-content" aria-live="polite">Загружаем записку…</div></section><section class="box report-section"><div class="box-title"><h2>Презентация по записке</h2></div><p class="muted">Сначала сформируйте аналитическую записку. Опишите желаемые акценты, задайте число слайдов и цвета; после генерации редактируйте текст и перетаскивайте блоки мышью или касанием. Сохраните правки перед скачиванием PPTX.</p><div class="slide-tools"><label class="btn small secondary" style="cursor:pointer">Добавить PPTX-образец <input id="presentation-template" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden></label><span id="presentation-template-status" class="muted">Проверяем образец…</span></div><p class="muted">Образец (до 5 МБ) задаёт шрифты, цвета, фон и расположение текста; картинки, анимация и текст образца не копируются. Загрузите его до генерации.</p><form id="presentation-form" class="form-grid"><div><label class="field-label" for="presentation-prompt">Пожелания к презентации</label><textarea id="presentation-prompt" maxlength="2000" placeholder="Например: акцентируй выводы по вопросам и ограничения исследования"></textarea></div><div class="presentation-fields"><div><label class="field-label" for="presentation-count">Слайдов (3–20)</label><input id="presentation-count" type="number" min="3" max="20" value="6" required></div><div><label class="field-label" for="presentation-background">Фон</label><input id="presentation-background" type="color" value="#ffffff"></div><div><label class="field-label" for="presentation-text">Текст</label><input id="presentation-text" type="color" value="#193a54"></div><div><label class="field-label" for="presentation-accent">Акцент</label><input id="presentation-accent" type="color" value="#14527c"></div></div><button class="btn small" type="submit">Сформировать презентацию с ИИ</button></form><div id="presentation-content" aria-live="polite">Загружаем презентацию…</div></section>`); loadReport(s.id); loadAnalyticalReport(s.id); loadPresentation(s.id).then(() => loadPresentationTemplate(s.id)); document.querySelector('#analytical-generate').onclick = event => generateAnalyticalReport(event,s.id); document.querySelector('#presentation-form').onsubmit = event => generatePresentation(event,s.id); document.querySelector('#presentation-template').onchange = event => uploadPresentationTemplate(event,s.id); }
       }
       document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => { if (editorState.dirty && !confirm('Несохранённый текст редактора будет потерян. Продолжить?')) return; editorState.dirty = false; state.tab = button.dataset.tab; state.selected = null; render(); });
       document.querySelector('#logout').onclick = async () => { try { if (!state.offline) await api('/logout','POST',{}); await store('cache','readwrite', items => items.delete('current')); clearTimeout(editorState.hintTimer); Object.assign(editorState,{dirty:false,history:[],hintRequest:editorState.hintRequest+1}); state.user = null; state.selected = null; state.tab = 'overview'; renderAuth(false); } catch (error) { notify(error.message,true); } };
@@ -953,7 +967,8 @@
         container.innerHTML = report ? `<p class="muted">Создано: ${esc(new Date(report.generated_at).toLocaleString('ru-RU'))}. Основа: ${report.snapshot.count} анкет, ${report.snapshot.questions.length} вопросов.</p>${report.snapshot.questions.length ? '' : '<p class="muted">Вопросы отсутствовали на момент формирования отчёта.</p>'}${report.stale ? '<p style="color:#a34a25"><strong>Данные изменились после генерации.</strong> Обновите записку перед передачей.</p>' : ''}<a class="btn small secondary" href="/api/studies/${studyId}/analytical-report.pdf">Скачать аналитический отчёт PDF ↓</a><div class="analytical-body">${report.content.split(/\n\s*\n/).map(block => `<p>${esc(block).replace(/\n/g,'<br>')}</p>`).join('')}</div>` : '<p class="muted">Записка ещё не создана. Сначала соберите не менее 10 анкет, затем нажмите «Сформировать с ИИ».</p>';
       } catch (error) { if (container.isConnected) container.innerHTML = `<p class="muted">Не удалось загрузить записку: ${esc(error.message)}</p>`; }
     }
-    async function generateAnalyticalReport(studyId, button) {
+    async function generateAnalyticalReport(event, studyId) {
+      const button = event.currentTarget;
       if (!confirm('Отправить обезличенные агрегированные показатели в DeepSeek для создания аналитической записки? Существующая записка будет заменена.')) return;
       button.disabled = true; button.textContent = 'Формируем записку…';
       try {
@@ -1033,15 +1048,36 @@
         selected = Math.min(selected,elements.length-1);
         stage.style.backgroundColor = slide.background || colors.background;
         stage.innerHTML = '';
+        if (slide.design) {
+          const design = slide.design;
+          const decoration = (klass,color) => {
+            const node = document.createElement('div'); node.className = `slide-decoration ${klass}`;
+            node.style.backgroundColor = color; stage.append(node);
+          };
+          if (design.variant === 'cover') {
+            decoration('cover-orb',design.panel); decoration('cover-orb-inner',design.soft);
+            decoration('cover-stripe',design.accent);
+          } else {
+            decoration('card',design.panel); decoration('stripe',design.accent);
+            decoration('dot',design.soft);
+          }
+          decoration('pill',design.soft);
+          if (elements.some(element => element.kind === 'callout')) decoration('callout-card',design.soft);
+          decoration('rule',design.soft);
+          const page = document.createElement('span'); page.className = 'slide-page';
+          page.textContent = `${String(Number(select.value)+1).padStart(2,'0')} / ${String(presentationDeck.slides.length).padStart(2,'0')}`;
+          page.style.color = design.accent; stage.append(page);
+        }
         elements.forEach((element,i) => {
           const node = document.createElement('div');
           node.className = `slide-element ${element.kind}${i === selected ? ' selected' : ''}`;
+          node.dataset.elementIndex = i;
           node.textContent = element.text;
-          Object.assign(node.style,{left:`${element.x}%`,top:`${element.y}%`,width:`${element.w}%`,height:`${element.h}%`,color:element.style?.color || (element.kind === 'title' ? colors.accent : colors.text),fontFamily:element.style?.font || 'Aptos',fontWeight:element.style ? (element.style.bold ? '700' : '400') : '',fontSize:element.style ? `${element.style.size * stage.clientHeight / 405}px` : ''});
+          Object.assign(node.style,{left:`${element.x}%`,top:`${element.y}%`,width:`${element.w}%`,height:`${element.h}%`,color:element.style?.color || (element.kind === 'title' ? colors.accent : colors.text),fontFamily:element.style?.font || 'Aptos',fontWeight:element.style ? (element.style.bold ? '700' : '400') : '',fontSize:element.style ? `${Math.max(9,element.style.size * stage.clientHeight / 540)}px` : ''});
           node.onpointerdown = event => {
             if (event.button !== 0) return;
             selected = i; showEditor();
-            stage.querySelectorAll('.slide-element').forEach((item,n) => item.classList.toggle('selected',n === i));
+            stage.querySelectorAll('.slide-element').forEach(item => item.classList.toggle('selected',Number(item.dataset.elementIndex) === i));
             const startX = event.clientX, startY = event.clientY, x = element.x, y = element.y;
             node.setPointerCapture(event.pointerId);
             node.onpointermove = move => {
@@ -1057,10 +1093,28 @@
         showEditor();
       };
       const showEditor = () => {
-        const element = presentationDeck.slides[Number(select.value)].elements[selected];
-        editor.innerHTML = `<label class="field-label" for="slide-text">${element.kind === 'title' ? 'Заголовок' : 'Текст'} — объект ${selected+1}</label><textarea id="slide-text" maxlength="1200"></textarea>`;
+        const slide = presentationDeck.slides[Number(select.value)], element = slide.elements[selected];
+        editor.innerHTML = `<label class="field-label" for="slide-text">${({title:'Заголовок',body:'Текст',tag:'Ярлычок',callout:'Главный вывод'})[element.kind]} — объект ${selected+1}</label><textarea id="slide-text" maxlength="1200"></textarea><div class="presentation-fields"><label class="field-label">Размер текста<input id="slide-font-size" type="number" min="8" max="64" step=".5" value="${element.style?.size || (element.kind === 'title' ? 28 : 17)}"></label><label class="field-label">Цвет текста<input id="slide-font-color" type="color" value="${element.style?.color || (element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text)}"></label><label class="field-label">Фон слайда<input id="slide-background" type="color" value="${slide.background || presentationDeck.colors.background}"></label></div>`;
         const input = editor.querySelector('textarea'); input.value = element.text;
-        input.oninput = () => { element.text = input.value; stage.children[selected].textContent = input.value; };
+        input.oninput = () => { element.text = input.value; stage.querySelector(`[data-element-index="${selected}"]`).textContent = input.value; };
+        const style = () => element.style ||= {font:'Aptos',size:element.kind === 'title' ? 28 : 17,bold:element.kind === 'title',color:element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text};
+        editor.querySelector('#slide-font-size').onchange = event => {
+          const size = Number(event.target.value);
+          if (!Number.isFinite(size) || size < 8 || size > 64) { notify('Размер шрифта: от 8 до 64',true); return; }
+          style().size = size; show();
+        };
+        editor.querySelector('#slide-font-color').oninput = event => { style().color = event.target.value; stage.querySelector(`[data-element-index="${selected}"]`).style.color = event.target.value; };
+        editor.querySelector('#slide-background').oninput = event => { slide.background = event.target.value; stage.style.backgroundColor = event.target.value; };
+        editor.querySelector('#slide-background').onchange = () => {
+          if (slide.design) {
+            const blend = (from,to,ratio) => '#' + [1,3,5].map(i => Math.round(parseInt(from.slice(i,i+2),16)*(1-ratio) + parseInt(to.slice(i,i+2),16)*ratio).toString(16).padStart(2,'0')).join('');
+            const dark = [0.2126,0.7152,0.0722].reduce((sum,weight,i) => sum + parseInt(slide.background.slice(1+i*2,3+i*2),16)*weight,0) < 145;
+            const target = dark ? '#ffffff' : slide.design.accent;
+            slide.design.panel = blend(slide.background,target,dark ? .10 : .045);
+            slide.design.soft = blend(slide.background,target,dark ? .18 : .10);
+          }
+          show();
+        };
       };
       select.onchange = () => { selected = 0; show(); };
       container.querySelector('#slide-save').onclick = async event => {

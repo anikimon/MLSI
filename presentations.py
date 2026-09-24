@@ -8,6 +8,7 @@ import zipfile
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE, MSO_FILL_TYPE
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from pptx.exc import PackageNotFoundError
 from pptx.util import Inches, Pt
@@ -17,6 +18,12 @@ DEFAULT_TITLE = {"font": "Aptos", "size": 28, "bold": True, "color": "#14527c"}
 DEFAULT_BODY = {"font": "Aptos", "size": 17, "bold": False, "color": "#193a54"}
 DEFAULT_LAYOUT = {"title": {"x": 6, "y": 8, "w": 88, "h": 20},
                   "body": {"x": 8, "y": 33, "w": 84, "h": 57}}
+MODERN_LAYOUT = {"cover": {"title": {"x": 9, "y": 23, "w": 77, "h": 25},
+                           "body": {"x": 9, "y": 53, "w": 76, "h": 29}},
+                 "content": {"title": {"x": 9, "y": 16, "w": 81, "h": 15},
+                             "body": {"x": 10, "y": 38, "w": 79, "h": 49}},
+                 "closing": {"title": {"x": 9, "y": 17, "w": 81, "h": 16},
+                             "body": {"x": 10, "y": 39, "w": 79, "h": 48}}}
 
 
 def hex_color(color):
@@ -43,6 +50,15 @@ def validate_colors(colors):
     return {key: colors[key].lower() for key in ("background", "text", "accent")}
 
 
+def _blend(first, second, ratio):
+    return "#" + "".join(f"{round(int(first[i:i+2], 16) * (1-ratio) + int(second[i:i+2], 16) * ratio):02x}"
+                         for i in (1, 3, 5))
+
+
+def _dark(color):
+    return sum(int(color[i:i+2], 16) * weight for i, weight in ((1, .2126), (3, .7152), (5, .0722))) < 145
+
+
 def validate_deck(deck):
     if not isinstance(deck, dict) or not isinstance(deck.get("slides"), list) or not 3 <= len(deck["slides"]) <= 20:
         raise ValueError("Презентация должна содержать от 3 до 20 слайдов")
@@ -52,7 +68,7 @@ def validate_deck(deck):
             raise ValueError("Каждый слайд должен содержать от 1 до 8 текстовых объектов")
         elements = []
         for element in slide["elements"]:
-            if not isinstance(element, dict) or element.get("kind") not in ("title", "body") or not isinstance(element.get("text"), str) or not element["text"].strip() or len(element["text"]) > 1200:
+            if not isinstance(element, dict) or element.get("kind") not in ("title", "body", "tag", "callout") or not isinstance(element.get("text"), str) or not element["text"].strip() or len(element["text"]) > 1200:
                 raise ValueError("Некорректный текст слайда")
             coordinates = [element.get(key) for key in ("x", "y", "w", "h")]
             if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100 for value in coordinates):
@@ -68,6 +84,14 @@ def validate_deck(deck):
         cleaned_slide = {"elements": elements}
         if "background" in slide:
             cleaned_slide["background"] = hex_color(slide["background"])
+        if "design" in slide:
+            design = slide["design"]
+            if not isinstance(design, dict) or design.get("variant") not in ("cover", "content", "closing"):
+                raise ValueError("Некорректное оформление слайда")
+            cleaned_slide["design"] = {"variant": design["variant"],
+                                        "panel": hex_color(design.get("panel")),
+                                        "soft": hex_color(design.get("soft")),
+                                        "accent": hex_color(design.get("accent"))}
         cleaned["slides"].append(cleaned_slide)
     return cleaned
 
@@ -170,23 +194,50 @@ def deck_from_outline(outline, count, colors, template=None):
             raise ValueError("ИИ вернул некорректную структуру слайдов")
         title = item["title"].strip()[:180]
         bullets = item["bullets"]
-        if not title or len(bullets) > 6 or any(not isinstance(bullet, str) or not bullet.strip() or len(bullet) > 180 for bullet in bullets):
+        if not title or not 1 <= len(bullets) <= 5 or any(not isinstance(bullet, str) or not bullet.strip() or len(bullet) > 320 for bullet in bullets):
             raise ValueError("ИИ вернул слишком длинный или пустой текст слайда")
         body = "\n".join("• " + bullet.strip() for bullet in bullets)
+        if len(body) > 1200:
+            raise ValueError("Слишком много текста на слайде")
+        summary = item.get("summary", "")
+        if not isinstance(summary, str) or len(summary) > 180:
+            raise ValueError("Некорректный итог слайда")
+        summary = summary.strip()
+        if summary and template and len(body) + len(summary) + 12 <= 1200:
+            body += "\n\nГлавное: " + summary
+        variant = "cover" if index == 0 else "closing" if index == count - 1 else "content"
         sample = template["cover" if index == 0 else "content"] if template else None
-        title_box = sample["layout"]["title"] if sample else DEFAULT_LAYOUT["title"]
-        body_box = sample["layout"]["body"] if sample else DEFAULT_LAYOUT["body"]
+        title_box = sample["layout"]["title"] if sample else MODERN_LAYOUT[variant]["title"]
+        body_box = sample["layout"]["body"] if sample else MODERN_LAYOUT[variant]["body"].copy()
+        if summary and not sample:
+            body_box["h"] -= 14
+        background = sample["background"] if index == 0 and sample else (
+            _blend(colors["accent"], "#091b30", .75) if variant == "cover" else colors["background"])
+        dark = _dark(background)
+        foreground = "#ffffff" if dark else colors["text"]
         elements = [{"kind": "title", "text": title, **title_box}]
         if sample:
             elements[0]["style"] = {**sample["title"], "color": sample["title"]["color"] if index == 0 else colors["accent"]}
-        if body:
-            element = {"kind": "body", "text": body, **body_box}
-            if sample:
-                element["style"] = {**sample["body"], "color": colors["text"]}
-            elements.append(element)
-        slide = {"elements": elements}
-        if sample:
-            slide["background"] = sample["background"] if index == 0 else colors["background"]
+        else:
+            elements[0]["style"] = {"font": "Aptos Display", "size": 36 if index == 0 else 29,
+                                     "bold": True, "color": foreground if dark else colors["accent"]}
+        element = {"kind": "body", "text": body, **body_box}
+        element["style"] = ({**sample["body"], "color": colors["text"]} if sample else
+                            {"font": "Aptos", "size": 16 if index == 0 else 15,
+                             "bold": False, "color": _blend(foreground, background, .12) if dark else colors["text"]})
+        elements.append(element)
+        label = "ИССЛЕДОВАНИЕ" if index == 0 else "ВЫВОДЫ И ОГРАНИЧЕНИЯ" if index == count - 1 else "РЕЗУЛЬТАТЫ ИССЛЕДОВАНИЯ"
+        elements.append({"kind": "tag", "text": label, "x": 9, "y": 5, "w": 48, "h": 7,
+                         "style": {"font": "Aptos", "size": 11, "bold": True,
+                                   "color": foreground if dark else colors["accent"]}})
+        if summary and not template:
+            elements.append({"kind": "callout", "text": summary, "x": 10, "y": 77, "w": 79, "h": 11,
+                             "style": {"font": "Aptos", "size": 14, "bold": True,
+                                       "color": foreground if dark else colors["accent"]}})
+        slide = {"elements": elements, "background": background,
+                 "design": {"variant": variant, "accent": colors["accent"],
+                            "panel": _blend(background, "#ffffff" if dark else colors["accent"], .10 if dark else .045),
+                            "soft": _blend(background, "#ffffff" if dark else colors["accent"], .18 if dark else .10)}}
         slides.append(slide)
     return validate_deck({"colors": colors, "slides": slides})
 
@@ -197,7 +248,7 @@ def pptx_bytes(deck):
     presentation.slide_width = Inches(13.333)
     presentation.slide_height = Inches(7.5)
     colors = {key: RGBColor.from_string(value[1:]) for key, value in deck["colors"].items()}
-    for item in deck["slides"]:
+    for index, item in enumerate(deck["slides"]):
         slide = presentation.slides.add_slide(presentation.slide_layouts[6])
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = RGBColor.from_string(item.get("background", deck["colors"]["background"])[1:])
@@ -223,6 +274,45 @@ def pptx_bytes(deck):
                     run.font.bold = style["bold"]
                     run.font.color.rgb = (RGBColor.from_string(style["color"][1:]) if element.get("style")
                                           else colors["accent" if element["kind"] == "title" else "text"])
+        design = item.get("design")
+        if design:
+            decorations = 0
+            def decoration(kind, x, y, w, h, fill):
+                nonlocal decorations
+                shape = slide.shapes.add_shape(kind, int(presentation.slide_width*x/100),
+                                               int(presentation.slide_height*y/100),
+                                               int(presentation.slide_width*w/100), int(presentation.slide_height*h/100))
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = RGBColor.from_string(fill[1:])
+                shape.line.fill.background()
+                # Keep all decoration behind editable text, regardless of insertion order.
+                tree = slide.shapes._spTree
+                tree.remove(shape._element)
+                tree.insert(2 + decorations, shape._element)
+                decorations += 1
+
+            variant = design["variant"]
+            background = item.get("background", deck["colors"]["background"])
+            if variant == "cover":
+                decoration(MSO_SHAPE.OVAL, 70, -18, 50, 89, design["panel"])
+                decoration(MSO_SHAPE.OVAL, 80, 3, 30, 54, design["soft"])
+                decoration(MSO_SHAPE.RECTANGLE, 7, 23, .7, 53, design["accent"])
+            else:
+                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
+                decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
+                decoration(MSO_SHAPE.OVAL, 91, 8, 3, 5.3, design["soft"])
+            decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 8, 4, 46, 8, design["soft"])
+            if any(element["kind"] == "callout" for element in item["elements"]):
+                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 9, 76, 82, 13, design["soft"])
+            decoration(MSO_SHAPE.RECTANGLE, 9, 92, 82, .25, design["soft"])
+            footer = slide.shapes.add_textbox(int(presentation.slide_width*.87),
+                                               int(presentation.slide_height*.93),
+                                               int(presentation.slide_width*.07),
+                                               int(presentation.slide_height*.04))
+            footer.text = f"{index+1:02d} / {len(deck['slides']):02d}"
+            font = footer.text_frame.paragraphs[0].runs[0].font
+            font.name, font.size = "Aptos", Pt(9)
+            font.color.rgb = RGBColor.from_string((_blend(background, "#ffffff" if _dark(background) else design["accent"], .55))[1:])
     output = io.BytesIO()
     presentation.save(output)
     return output.getvalue()

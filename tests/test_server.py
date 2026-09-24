@@ -19,6 +19,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
 
+from presentations import pptx_bytes
 from reports import analytical_pdf_bytes
 from server import create_server, init_db
 
@@ -668,7 +669,8 @@ class PlannerTest(unittest.TestCase):
             self.request(self.admin, f"/studies/{sid}/responses", "POST", {"answers": {"q1": "личный ответ"}})
         with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value="Обзор и выводы"):
             self.assertEqual(self.request(self.admin, f"/studies/{sid}/analytical-report", "POST", {})[0], 200)
-        outline = json.dumps({"slides": [{"title": f"Слайд {i}", "bullets": ["Вывод по отчёту"]} for i in range(1, 4)]})
+        outline = json.dumps({"slides": [{"title": f"Слайд {i}", "bullets": ["Развернутый вывод по отчёту с объяснением результатов."],
+                                          "summary": "Основной вывод по выборке"} for i in range(1, 4)]})
         with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value=outline) as ai:
             status, response = self.request(self.admin, path, "POST", request)
             self.assertEqual(status, 200)
@@ -677,6 +679,11 @@ class PlannerTest(unittest.TestCase):
             self.assertNotIn("личный ответ", json.dumps(sent, ensure_ascii=False))
         deck = response["presentation"]
         self.assertEqual(len(deck["slides"]), 3)
+        self.assertEqual(deck["slides"][0]["design"]["variant"], "cover")
+        self.assertEqual(deck["slides"][1]["design"]["variant"], "content")
+        self.assertEqual(deck["slides"][2]["design"]["variant"], "closing")
+        self.assertEqual(deck["slides"][1]["elements"][3]["text"], "Основной вывод по выборке")
+        self.assertTrue(deck["slides"][0]["background"].startswith("#"))
         self.assertFalse(self.request(self.admin, path)[1]["stale"])
         deck["slides"][0]["elements"][0].update(text="Перемещённый заголовок", x=10, y=15)
         self.assertEqual(self.request(self.admin, path, "PUT", deck)[0], 200)
@@ -684,7 +691,23 @@ class PlannerTest(unittest.TestCase):
         pptx = self.request(self.admin, path + ".pptx", binary=True)[1]
         slides = Presentation(io.BytesIO(pptx)).slides
         self.assertEqual(len(slides), 3)
-        self.assertEqual(slides[0].shapes[0].text, "Перемещённый заголовок")
+        self.assertIn("Перемещённый заголовок", [shape.text for shape in slides[0].shapes if shape.has_text_frame])
+        self.assertIn("Основной вывод по выборке", [shape.text for shape in slides[1].shapes if shape.has_text_frame])
+        self.assertGreater(len(slides[1].shapes), len(deck["slides"][1]["elements"]))
+        self.assertFalse(slides[1].shapes[0].has_text_frame and slides[1].shapes[0].text)
+        self.assertEqual(slides[1].shapes[0].fill.fore_color.rgb,
+                         RGBColor.from_string(deck["slides"][1]["design"]["panel"][1:]))
+        deck["slides"][1]["elements"][3]["text"] = "Исправленный вывод"
+        deck["slides"][1]["elements"][3]["style"]["size"] = 18
+        deck["slides"][1]["background"] = "#eaf4f8"
+        self.assertEqual(self.request(self.admin, path, "PUT", deck)[0], 200)
+        edited = Presentation(io.BytesIO(self.request(self.admin, path + ".pptx", binary=True)[1])).slides[1]
+        self.assertEqual(edited.background.fill.fore_color.rgb, RGBColor(234, 244, 248))
+        self.assertEqual(next(shape for shape in edited.shapes if shape.has_text_frame and shape.text == "Исправленный вывод")
+                         .text_frame.paragraphs[0].runs[0].font.size.pt, 18)
+        self.assertEqual(self.request(self.admin, path, "PUT", {**deck, "slides": [
+            {**deck["slides"][0], "design": {**deck["slides"][0]["design"], "panel": "invalid"}},
+            *deck["slides"][1:]]})[0], 400)
         self.assertEqual(self.request(self.admin, path, "PUT", {**deck, "colors": {**colors, "accent": "red"}})[0], 400)
         self.assertEqual(self.request(self.admin, path, "PUT", {**deck, "slides": [{"elements": [{"kind": "body", "text": "x", "x": -1, "y": 0, "w": 20, "h": 10}]}] * 3})[0], 400)
         with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value="Новый текст записки"):
@@ -755,9 +778,11 @@ class PlannerTest(unittest.TestCase):
         self.assertGreater(deck["slides"][0]["elements"][0]["x"], 10)
         slides = Presentation(io.BytesIO(self.request(self.admin, f"/studies/{sid}/presentation.pptx", binary=True)[1])).slides
         self.assertEqual(slides[0].background.fill.fore_color.rgb, RGBColor(32, 32, 64))
-        self.assertEqual(slides[0].shapes[0].text_frame.paragraphs[0].runs[0].font.name, "Georgia")
-        self.assertEqual(slides[0].shapes[0].text_frame.paragraphs[0].runs[0].font.color.rgb, RGBColor(255, 204, 0))
-        self.assertEqual(slides[1].shapes[1].text_frame.paragraphs[0].runs[0].font.name, "Times New Roman")
+        cover_title = next(shape for shape in slides[0].shapes if shape.has_text_frame and shape.text == "Тест 0")
+        content_body = next(shape for shape in slides[1].shapes if shape.has_text_frame and "Итог" in shape.text)
+        self.assertEqual(cover_title.text_frame.paragraphs[0].runs[0].font.name, "Georgia")
+        self.assertEqual(cover_title.text_frame.paragraphs[0].runs[0].font.color.rgb, RGBColor(255, 204, 0))
+        self.assertEqual(content_body.text_frame.paragraphs[0].runs[0].font.name, "Times New Roman")
         self.assertNotIn("образца", " ".join(shape.text for slide in slides for shape in slide.shapes if shape.has_text_frame))
         deck["slides"][1]["elements"][1]["text"] = "Изменённый текст"
         self.assertEqual(self.request(self.admin, f"/studies/{sid}/presentation", "PUT", deck)[0], 200)
@@ -771,6 +796,14 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(self.request(self.admin, f"/studies/{sid}", "DELETE", {})[0], 200)
         with closing(sqlite3.connect(self.db_path)) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM presentation_templates WHERE study_id = ?", (sid,)).fetchone()[0], 0)
+
+    def test_legacy_presentation_still_exports_without_modern_decoration(self):
+        deck = {"colors": {"background": "#ffffff", "text": "#193a54", "accent": "#14527c"},
+                "slides": [{"elements": [{"kind": "title", "text": "Старый слайд", "x": 6, "y": 8,
+                                          "w": 88, "h": 20}]} for _ in range(3)]}
+        slides = Presentation(io.BytesIO(pptx_bytes(deck))).slides
+        self.assertEqual(len(slides[0].shapes), 1)
+        self.assertEqual(slides[0].shapes[0].text, "Старый слайд")
 
 
 if __name__ == "__main__":
