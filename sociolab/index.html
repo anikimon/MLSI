@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Социологическая лаборатория</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="auth" class="auth-wrap hidden">
+    <div class="auth-card">
+      <h1 id="authTitle">Вход</h1>
+      <p class="sub" id="authSub">Введите почту и пароль</p>
+
+      <form id="registerForm" class="hidden">
+        <label for="regName">Имя</label>
+        <input id="regName" autocomplete="name" required>
+        <label for="regEmail">Почта</label>
+        <input id="regEmail" type="email" autocomplete="email" required>
+        <label for="regPassword">Пароль (минимум 8 символов)</label>
+        <input id="regPassword" type="password" autocomplete="new-password" required>
+        <button type="submit">Создать администратора</button>
+      </form>
+
+      <form id="loginForm" class="hidden">
+        <label for="loginEmail">Почта</label>
+        <input id="loginEmail" type="email" autocomplete="email" required>
+        <label for="loginPassword">Пароль</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" required>
+        <button type="submit">Войти</button>
+      </form>
+
+      <form id="codeForm" class="hidden">
+        <label for="codeInput">Код из письма</label>
+        <input id="codeInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>
+        <button type="submit">Подтвердить</button>
+        <button type="button" class="ghost" id="backToLogin" style="margin-top:10px">Назад</button>
+      </form>
+
+      <div class="error" id="authError"></div>
+      <div class="success" id="authInfo"></div>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <header class="topbar">
+      <div class="brand">НИЛ · Социологическая лаборатория</div>
+      <nav>
+        <a id="navSurveys" class="active">Исследования</a>
+        <a id="navTeam" class="hidden">Команда</a>
+        <span class="muted" id="userLabel"></span>
+        <button class="ghost small" id="logoutBtn">Выйти</button>
+      </nav>
+    </header>
+    <main id="view"></main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
