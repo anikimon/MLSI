@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
+from media_monitor import AGENTS, collect as collect_media, summarize as summarize_media
 from reports import analytical_pdf_bytes, analytical_snapshot, build_member_quotas, build_quotas, build_report, parse_weight, pdf_bytes, read_excel
 from presentations import deck_from_outline, extract_template_style, pptx_bytes, validate_colors, validate_deck
 
@@ -200,6 +201,18 @@ def init_db(path):
                 name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
                 content BLOB NOT NULL, created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS media_monitors (
+                id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1, interval_minutes INTEGER NOT NULL DEFAULT 30,
+                next_run TEXT NOT NULL, running_until TEXT, last_run TEXT, last_result TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE IF NOT EXISTS media_items (
+                id INTEGER PRIMARY KEY, monitor_id INTEGER NOT NULL REFERENCES media_monitors(id) ON DELETE CASCADE,
+                source TEXT NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL, url TEXT NOT NULL,
+                published TEXT NOT NULL, collected_at TEXT NOT NULL,
+                UNIQUE(monitor_id, url)
+            );
+            CREATE INDEX IF NOT EXISTS media_items_recent ON media_items(monitor_id, id DESC);
             """)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(responses)")}
             if "weight" not in columns:
@@ -315,6 +328,59 @@ def normalize_answers(questions, answers):
             raise ApiError(400, f"Ответьте на вопрос: {q['label']}")
         normalized[q["id"]] = value
     return normalized
+
+
+def run_media_monitor(path, monitor_id, force=False):
+    db = connect(path)
+    try:
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            moment = now()
+            cursor = db.execute("""UPDATE media_monitors SET running_until = ?
+                WHERE id = ? AND enabled = 1 AND (running_until IS NULL OR running_until < ?)
+                AND (? = 1 OR next_run <= ?)""", ((datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat(timespec="seconds"),
+                                                    monitor_id, moment, int(force), moment))
+            if not cursor.rowcount:
+                return False
+            monitor = dict(db.execute("SELECT * FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone())
+        try:
+            with db:
+                added, results = collect_media(db, monitor)
+                db.execute("""DELETE FROM media_items WHERE monitor_id = ? AND id NOT IN
+                    (SELECT id FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000)""",
+                           (monitor_id, monitor_id))
+                summary = summarize_media(db.execute("SELECT source, title FROM media_items WHERE monitor_id = ?",
+                                                     (monitor_id,)).fetchall())
+                results["added"] = added
+                results["summary"] = summary
+                db.execute("""UPDATE media_monitors SET running_until = NULL, last_run = ?, next_run = ?, last_result = ?
+                    WHERE id = ?""", (now(), (datetime.now(timezone.utc) + timedelta(minutes=monitor["interval_minutes"])).isoformat(timespec="seconds"),
+                                      json.dumps(results, ensure_ascii=False), monitor_id))
+        except Exception:
+            with db:
+                db.execute("UPDATE media_monitors SET running_until = NULL, next_run = ? WHERE id = ?",
+                           ((datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(timespec="seconds"), monitor_id))
+            raise
+        return True
+    finally:
+        db.close()
+
+
+def media_scheduler(path, stop):
+    while not stop.wait(15):
+        try:
+            db = connect(path)
+            try:
+                ids = [row[0] for row in db.execute("""SELECT id FROM media_monitors WHERE enabled = 1
+                    AND next_run <= ? AND (running_until IS NULL OR running_until < ?) LIMIT 5""", (now(), now()))]
+            finally:
+                db.close()
+            for monitor_id in ids:
+                if stop.is_set():
+                    break
+                run_media_monitor(path, monitor_id)
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            print("Media monitor error:", repr(exc))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -433,6 +499,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, db, path):
         method = self.command
+        if path == "/api/media" or re.fullmatch(r"/api/media/\d+(?:/(?:run|export\.csv|export\.json|export\.md))?", path):
+            self.media_route(db, path, method)
+            return
         if path == "/api/session" and method == "GET":
             user = self.current_user(db)
             setup = not db.execute("SELECT 1 FROM users LIMIT 1").fetchone()
@@ -1322,6 +1391,90 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(409, "Идентификатор операции уже использован")
         return True
 
+    def media_route(self, db, path, method):
+        self.require(db, {"admin", "researcher"})
+        match = re.fullmatch(r"/api/media/(\d+)(?:/(run|export\.csv|export\.json|export\.md))?", path)
+        if not match:
+            if method == "GET":
+                monitors = [dict(row) for row in db.execute("SELECT * FROM media_monitors ORDER BY id DESC")]
+                for monitor in monitors:
+                    monitor["last_result"] = json.loads(monitor["last_result"])
+                self.send_json(200, {"monitors": monitors, "agents": AGENTS})
+                return
+            if method == "POST":
+                data = self.read_json()
+                question = clean_text(data.get("question", ""), 240, True)
+                hashtag = data.get("hashtag", "")
+                if not isinstance(hashtag, str) or not re.fullmatch(r"#?[\wа-яА-ЯёЁ]{0,60}", hashtag):
+                    raise ApiError(400, "Укажите один хэштег без пробелов или оставьте поле пустым")
+                hashtag = hashtag.lstrip("#")
+                interval = data.get("interval_minutes", 30)
+                if type(interval) is not int or not 15 <= interval <= 1440:
+                    raise ApiError(400, "Интервал: от 15 до 1440 минут")
+                cursor = db.execute("""INSERT INTO media_monitors
+                    (question, hashtag, interval_minutes, next_run) VALUES (?, ?, ?, ?)""",
+                    (question, hashtag, interval, now()))
+                self.send_json(201, {"id": cursor.lastrowid})
+                return
+            raise ApiError(405, "Метод не поддерживается")
+        monitor_id, action = int(match[1]), match[2]
+        row = db.execute("SELECT * FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone()
+        if not row:
+            raise ApiError(404, "Тема мониторинга не найдена")
+        if action == "run" and method == "POST":
+            self.read_json()
+            if not row["enabled"]:
+                raise ApiError(409, "Сначала включите мониторинг")
+            if not run_media_monitor(self.db_path, monitor_id, force=True):
+                raise ApiError(409, "Сбор уже выполняется")
+            result = db.execute("SELECT last_result FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone()
+            self.send_json(200, {"result": json.loads(result["last_result"])})
+            return
+        if action is None and method == "PATCH":
+            data = self.read_json()
+            if type(data.get("enabled")) is not bool:
+                raise ApiError(400, "Укажите состояние мониторинга")
+            db.execute("UPDATE media_monitors SET enabled = ?, next_run = ? WHERE id = ?",
+                       (int(data["enabled"]), now(), monitor_id))
+            self.send_json(200, {"ok": True})
+            return
+        if action is None and method == "DELETE":
+            db.execute("DELETE FROM media_monitors WHERE id = ?", (monitor_id,))
+            self.send_json(200, {"ok": True})
+            return
+        if method == "GET":
+            rows = [dict(item) for item in db.execute("""SELECT source, title, excerpt, url, published, collected_at
+                FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000""", (monitor_id,))]
+            summary = summarize_media(rows)
+            if action is None or action == "export.json":
+                result = {"monitor": {**dict(row), "last_result": json.loads(row["last_result"])},
+                          "summary": summary, "items": rows, "agents": AGENTS}
+                if action is None:
+                    self.send_json(200, result)
+                else:
+                    self.send_bytes(200, json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"),
+                                    "application/json; charset=utf-8", {"Content-Disposition": f"attachment; filename=media-{monitor_id}.json"})
+                return
+            if action == "export.csv":
+                output = io.StringIO(newline="")
+                writer = csv.writer(output, lineterminator="\r\n")
+                writer.writerow(["Источник", "Заголовок", "Фрагмент", "Ссылка", "Дата публикации", "Дата сбора"])
+                for item in rows:
+                    writer.writerow([csv_safe(item[key]) for key in ("source", "title", "excerpt", "url", "published", "collected_at")])
+                self.send_bytes(200, b"\xef\xbb\xbf" + output.getvalue().encode("utf-8"), "text/csv; charset=utf-8",
+                                {"Content-Disposition": f"attachment; filename=media-{monitor_id}.csv"})
+                return
+            if action == "export.md":
+                lines = [f"# Медиаанализ: {row['question']}", "", f"Материалов: {summary['total']}; СМИ: {summary['news']}; соцсети: {summary['social']}.",
+                         "", "Частые слова в заголовках: " + ", ".join(f"{term['word']} ({term['count']})" for term in summary["terms"]), ""]
+                for item in rows:
+                    lines.extend([f"## {item['source']}: {item['title'].replace(chr(10), ' ')}", item["published"],
+                                  item["excerpt"], item["url"], ""])
+                self.send_bytes(200, "\n".join(lines).encode("utf-8"), "text/markdown; charset=utf-8",
+                                {"Content-Disposition": f"attachment; filename=media-{monitor_id}.md"})
+                return
+        raise ApiError(405, "Метод не поддерживается")
+
     @staticmethod
     def user_fields(data):
         name = clean_text(data.get("name", ""), 100, True)
@@ -1367,7 +1520,18 @@ def create_server(path=None, host="127.0.0.1", port=8000, seed_demo=True):
     handler = type("LabHandler", (Handler,), {"db_path": db_path, "demo_enabled": seed_demo,
                                                 "failed_logins": {}, "login_lock": threading.Lock(),
                                                 "ai_requests": {}, "report_requests": {}, "presentation_requests": {}, "ai_lock": threading.Lock()})
-    return ThreadingHTTPServer((host, port), handler)
+    stop = threading.Event()
+
+    class LabServer(ThreadingHTTPServer):
+        def server_close(self):
+            stop.set()
+            self.media_thread.join(timeout=2)
+            super().server_close()
+
+    server = LabServer((host, port), handler)
+    server.media_thread = threading.Thread(target=media_scheduler, args=(db_path, stop), daemon=True)
+    server.media_thread.start()
+    return server
 
 
 if __name__ == "__main__":

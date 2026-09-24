@@ -21,7 +21,7 @@ from pptx.util import Inches, Pt
 
 from presentations import pptx_bytes
 from reports import analytical_pdf_bytes
-from server import create_server, init_db
+from server import create_server, init_db, run_media_monitor
 
 
 class PlannerTest(unittest.TestCase):
@@ -68,6 +68,59 @@ class PlannerTest(unittest.TestCase):
         workbook.save(buffer)
         workbook.close()
         return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    def test_media_monitor_collects_deduplicates_exports_and_enforces_roles(self):
+        self.assertEqual(self.request(self.admin, "/media")[0], 401)
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        self.request(self.admin, "/users", "POST", {"name": "Интервьюер", "email": "field@test.org",
+            "password": "secure-pass-789", "role": "interviewer"})
+        self.request(self.interviewer, "/login", "POST", {"email": "field@test.org", "password": "secure-pass-789"})
+        self.assertEqual(self.request(self.interviewer, "/media")[0], 403)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "hashtag": "bad tag"})[0], 400)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "interval_minutes": 1})[0], 400)
+        status, data = self.request(self.admin, "/media", "POST", {"question": "городские парки", "hashtag": "парки"})
+        self.assertEqual(status, 201)
+        mid = data["id"]
+        self.assertEqual(self.request(self.admin, f"/media/{mid}")[1]["summary"]["total"], 0)
+
+        def fake_fetch(url):
+            if "news.google.com" in url:
+                return ("<rss><channel><item><title>Городские парки развиваются</title>"
+                        "<link>https://news.google.com/articles/test</link>"
+                        "<description>Открытие новых зон</description><pubDate>Mon, 21 Sep 2026 00:00:00 GMT</pubDate>"
+                        "</item></channel></rss>").encode()
+            self.assertIn("mastodon.social", url)
+            return json.dumps([{"content": "<p>Городские парки радуют</p>", "url": "https://mastodon.social/@test/1",
+                                "created_at": "2026-09-21T00:00:00Z"},
+                               {"content": "<p>Другая тема</p>", "url": "https://mastodon.social/@test/2"}]).encode()
+
+        with patch("media_monitor.fetch", side_effect=fake_fetch):
+            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]["added"], 2)
+            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]["added"], 0)
+            self.assertFalse(run_media_monitor(self.db_path, mid))  # interval not elapsed
+            with closing(sqlite3.connect(self.db_path)) as db, db:
+                db.execute("UPDATE media_monitors SET next_run = '2020-01-01' WHERE id = ?", (mid,))
+            self.assertTrue(run_media_monitor(self.db_path, mid))
+        def failing_news(url):
+            if "news.google.com" in url:
+                raise OSError("источник недоступен")
+            return fake_fetch(url)
+        with patch("media_monitor.fetch", side_effect=failing_news):
+            result_status = self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]
+            self.assertIn("Ошибка источника", result_status["news"])
+            self.assertEqual(result_status["social"], "Добавлено: 0")
+        result = self.request(self.admin, f"/media/{mid}")[1]
+        self.assertEqual((result["summary"]["total"], result["summary"]["news"], result["summary"]["social"]), (2, 1, 1))
+        csv_data = self.request(self.admin, f"/media/{mid}/export.csv", binary=True)[1].decode("utf-8-sig")
+        self.assertEqual(len(list(csv.reader(io.StringIO(csv_data)))), 3)
+        self.assertEqual(len(json.loads(self.request(self.admin, f"/media/{mid}/export.json", binary=True)[1])["items"]), 2)
+        self.assertIn("Материалов: 2", self.request(self.admin, f"/media/{mid}/export.md", binary=True)[1].decode())
+        self.assertEqual(self.request(self.admin, f"/media/{mid}", "PATCH", {"enabled": False})[0], 200)
+        self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[0], 409)
+        self.assertEqual(self.request(self.admin, f"/media/{mid}", "DELETE")[0], 200)
+        self.assertEqual(self.request(self.admin, f"/media/{mid}")[0], 404)
+        with closing(sqlite3.connect(self.db_path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM media_items").fetchone()[0], 0)
 
     def test_existing_studies_gain_goal_and_tasks(self):
         path = Path(self.temp.name) / "legacy.db"

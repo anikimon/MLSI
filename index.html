@@ -249,8 +249,15 @@
     .calendar-day small.late { color:#a34442; }
     .calendar-agenda { margin-top:19px; }
     .calendar-agenda .file-row { flex-wrap:wrap; }
+    .media-grid { display:grid; grid-template-columns:minmax(220px,1fr) minmax(0,2fr); gap:16px; margin-top:20px; }
+    .media-list { display:grid; gap:9px; align-content:start; }
+    .media-topic,.media-entry { border:1px solid var(--line); border-radius:9px; padding:13px; background:#f8fcff; overflow-wrap:anywhere; }
+    .media-topic strong,.media-entry strong { display:block; margin-bottom:6px; }
+    .media-entry { margin:9px 0; background:#fff; }
+    .media-entry p { margin:6px 0; white-space:normal; }
+    .media-entry a { overflow-wrap:anywhere; }
     @media (max-width:1000px) { .stats { grid-template-columns:repeat(2,1fr); } .detail-layout,.editor-layout { grid-template-columns:1fr; } .assistant-pane { position:static; } }
-    @media (max-width:700px) { .shell { display:block; } .sidebar { position:relative; height:auto; padding:17px 16px 12px; } .brand { font-size:21px; } .brand-sub,.nav-label,.sidebar-bottom { display:none; } .sidebar nav { display:flex; gap:4px; margin-top:14px; overflow:auto; } .nav-item { width:auto; flex:none; padding:9px 10px; font-size:11px; } .main { padding:0 16px 50px; } .topbar { min-height:55px; height:auto; padding:9px 0; } .top-meta { display:none; } .page-head { align-items:start; flex-direction:column; margin:29px 0 21px; } .cards,.field-list,.quota-board .quota-list { grid-template-columns:1fr; } .auth-wrap { display:block; } .auth-art { min-height:260px; padding:25px; } .auth-art h1 { margin:30px 0 10px; font-size:35px; } .auth-art p { margin-bottom:10px; font-size:12px; } .auth-art small { display:none; } .auth-form { min-height:430px; } .modal-layer:has(#survey-form) { padding:0; } .modal:has(#survey-form) { width:100%; height:100dvh; max-height:100dvh; border-radius:0; padding:22px; } .survey-choice { min-height:44px; } .sync-status { flex-wrap:wrap; justify-content:flex-end; } }
+    @media (max-width:700px) { .shell { display:block; } .sidebar { position:relative; height:auto; padding:17px 16px 12px; } .brand { font-size:21px; } .brand-sub,.nav-label,.sidebar-bottom { display:none; } .sidebar nav { display:flex; gap:4px; margin-top:14px; overflow:auto; } .nav-item { width:auto; flex:none; padding:9px 10px; font-size:11px; } .main { padding:0 16px 50px; } .topbar { min-height:55px; height:auto; padding:9px 0; } .top-meta { display:none; } .page-head { align-items:start; flex-direction:column; margin:29px 0 21px; } .cards,.field-list,.quota-board .quota-list,.media-grid { grid-template-columns:1fr; } .auth-wrap { display:block; } .auth-art { min-height:260px; padding:25px; } .auth-art h1 { margin:30px 0 10px; font-size:35px; } .auth-art p { margin-bottom:10px; font-size:12px; } .auth-art small { display:none; } .auth-form { min-height:430px; } .modal-layer:has(#survey-form) { padding:0; } .modal:has(#survey-form) { width:100%; height:100dvh; max-height:100dvh; border-radius:0; padding:22px; } .survey-choice { min-height:44px; } .sync-status { flex-wrap:wrap; justify-content:flex-end; } }
     @media (max-width:440px) { .stats { gap:8px; } .stat { min-height:110px; padding:14px; } .stat-number { font-size:30px; } .box { padding:17px; } .stage { font-size:9px; } .form-two,.member-grid,.compound-row,.editor-toolbar { grid-template-columns:1fr; } .modal { padding:19px; } .report-grid { grid-template-columns:1fr; } .report-bar-row { grid-template-columns:minmax(75px,1fr) minmax(60px,1fr) 48px; gap:6px; } .calendar-day { min-height:66px; padding:4px; font-size:11px; } .calendar-day small { font-size:9px; } }
   </style>
 </head>
@@ -267,7 +274,7 @@
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
     const isAdmin = () => state.user?.role === 'admin';
     const canManage = () => ['admin','researcher'].includes(state.user?.role) && !state.offline;
-    const allowedTabs = () => isAdmin() ? ['overview','studies','calendar','field','focus','editor','team'] : state.user?.role === 'researcher' ? ['studies','calendar','focus'] : ['field'];
+    const allowedTabs = () => isAdmin() ? ['overview','studies','media','calendar','field','focus','editor','team'] : state.user?.role === 'researcher' ? ['studies','media','calendar','focus'] : ['field'];
     const date = value => value ? new Date(value.length === 10 ? value + 'T12:00:00' : value).toLocaleDateString('ru-RU') : 'Не указан';
     const study = id => state.studies.find(item => item.id === Number(id));
     const focusSessions = new Map();
@@ -374,10 +381,10 @@
       if (!allowedTabs().includes(state.tab)) state.tab = allowedTabs()[0];
       if (state.user.role === 'interviewer') state.selected = null;
       const active = state.selected != null ? 'studies' : state.tab;
-      const navigation = [['overview','▦','Обзор'],['studies','◫','Исследования'],['calendar','▦','Календарь'],['field','◉','Полевой опрос'],['focus','◎','Фокус-группы'],['editor','✎','Редактор'],['team','♙','Команда']].filter(([key]) => allowedTabs().includes(key));
+      const navigation = [['overview','▦','Обзор'],['studies','◫','Исследования'],['media','◈','Медиаанализ'],['calendar','▦','Календарь'],['field','◉','Полевой опрос'],['focus','◎','Фокус-группы'],['editor','✎','Редактор'],['team','♙','Команда']].filter(([key]) => allowedTabs().includes(key));
       const calendarView = state.selected == null && state.tab === 'calendar';
       if (calendarView) state.tab = 'studies';
-      app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand">НИЛ «МЛСИ»</div><div class="brand-sub">Социологическая лаборатория</div><div class="nav-label">Рабочее пространство</div><nav>${navigation.map(([key,icon,label]) => `<button class="nav-item ${active === key ? 'active' : ''}" data-tab="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="user-card"><span class="avatar">${esc(state.user.name.slice(0,1).toUpperCase())}</span><div><strong>${esc(state.user.name)}</strong><small>${roles[state.user.role]}</small></div></div><button class="logout" id="logout">Выйти из аккаунта →</button></div></aside><div class="main"><div class="topbar"><span class="breadcrumb">НИЛ «МЛСИ» <span style="color:#94b2c8">/</span> <b>${state.selected != null ? 'Исследование' : ({overview:'Обзор',studies:'Исследования',field:'Полевой опрос',focus:'Фокус-группы',editor:'Редактор',team:'Команда'})[state.tab]}</b></span><span class="sync-status" id="sync-status"></span></div><main class="page" id="content">${state.selected != null ? renderDetail(study(state.selected)) : ({overview:renderOverview,studies:renderStudies,field:renderField,focus:renderFocus,editor:renderEditor,team:renderTeam})[state.tab]()}</main></div></div>`;
+      app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand">НИЛ «МЛСИ»</div><div class="brand-sub">Социологическая лаборатория</div><div class="nav-label">Рабочее пространство</div><nav>${navigation.map(([key,icon,label]) => `<button class="nav-item ${active === key ? 'active' : ''}" data-tab="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="user-card"><span class="avatar">${esc(state.user.name.slice(0,1).toUpperCase())}</span><div><strong>${esc(state.user.name)}</strong><small>${roles[state.user.role]}</small></div></div><button class="logout" id="logout">Выйти из аккаунта →</button></div></aside><div class="main"><div class="topbar"><span class="breadcrumb">НИЛ «МЛСИ» <span style="color:#94b2c8">/</span> <b>${state.selected != null ? 'Исследование' : ({overview:'Обзор',studies:'Исследования',media:'Медиаанализ',field:'Полевой опрос',focus:'Фокус-группы',editor:'Редактор',team:'Команда'})[state.tab]}</b></span><span class="sync-status" id="sync-status"></span></div><main class="page" id="content">${state.selected != null ? renderDetail(study(state.selected)) : ({overview:renderOverview,studies:renderStudies,media:renderMedia,field:renderField,focus:renderFocus,editor:renderEditor,team:renderTeam})[state.tab]()}</main></div></div>`;
       if (calendarView) { state.tab = 'calendar'; document.querySelector('.breadcrumb b').textContent = 'Календарь'; document.querySelector('#content').innerHTML = renderCalendar(); }
       if (state.selected == null && state.tab === 'overview' && state.studies.some(s => s.member_quotas?.length)) {
         document.querySelector('#content').insertAdjacentHTML('beforeend', `<section class="quota-board"><div class="section-head"><h2>Персональные составные квоты</h2><span>Без весов, Excel и ответов по ссылке</span></div><div class="quota-list">${state.studies.filter(s => s.member_quotas?.length).map(s => `<div class="quota-group"><h3>${esc(s.title)}</h3>${quotaMarkup(s.member_quotas.map(q => ({label:q.label + ' · ' + q.user_name,rows:[q]})))}</div>`).join('')}</div></section>`);
@@ -396,6 +403,7 @@
       }
       if (state.selected == null && state.tab === 'focus' && !state.offline) state.studies.forEach(s => loadFocus(s.id));
       if (state.selected == null && state.tab === 'editor' && !state.offline && state.studies.length) bindEditor();
+      if (state.selected == null && state.tab === 'media' && !state.offline) loadMedia();
       if (calendarView && !state.offline) loadCalendar();
       if (state.selected != null && canManage()) {
         const s = study(state.selected);
@@ -420,6 +428,52 @@
       return heading('Добро пожаловать','Работа в фокусе','Все исследования и полевые данные вашей команды в одном месте.', canManage() ? '<button class="btn" data-action="new-study">+ Новое исследование</button>' : '') + `<div class="stats"><div class="stat"><span class="stat-label">Всего исследований</span><strong class="stat-number">${studies.length}</strong><span class="stat-note">В базе лаборатории</span></div><div class="stat"><span class="stat-label">В работе</span><strong class="stat-number">${active.length}</strong><span class="stat-note">Активные проекты</span></div><div class="stat"><span class="stat-label">Полевой этап</span><strong class="stat-number">${studies.filter(s => s.stage === 'field').length}</strong><span class="stat-note">Сбор данных</span></div><div class="stat"><span class="stat-label">Собрано анкет</span><strong class="stat-number">${studies.reduce((n,s) => n+s.response_count,0)}</strong><span class="stat-note">Ответы респондентов</span></div></div>${canManage() && studies.some(s => s.quotas?.length) ? `<section class="quota-board"><div class="section-head"><h2>Прогресс квот</h2><span>Без весов и отказов</span></div><div class="quota-list">${studies.filter(s => s.quotas?.length).map(s => `<div class="quota-group"><h3>${esc(s.title)}</h3>${quotaMarkup(s.quotas)}</div>`).join('')}</div></section>` : ''}<div class="section-head"><h2>Последние исследования</h2><span>${studies.length} проектов</span></div>${studies.length ? `<div class="cards">${studies.slice(0,4).map(studyCard).join('')}</div>` : empty('Пока нет исследований','Создайте первый проект, чтобы начать планирование.')}`;
     }
     function renderStudies() { return heading('Реестр проектов','Исследования','От идеи и полевого этапа до обработки и результата.',canManage() ? '<button class="btn" data-action="new-study">+ Новое исследование</button>' : '') + (state.studies.length ? `<div class="cards">${state.studies.map(studyCard).join('')}</div>` : empty('Исследований пока нет','Добавьте проект, чтобы вести его этапы, файлы и анкету.')); }
+    let mediaSelected = null;
+    function renderMedia() {
+      if (state.offline) return heading('Публичные источники','Медиаанализ','Для мониторинга требуется подключение к серверу.') + empty('Нет подключения','Подключитесь к серверу и откройте раздел снова.');
+      return heading('Публичные источники','Медиаанализ','Наблюдение за публикациями СМИ и открытой социальной сетью по заданной теме.') +
+        `<section class="box"><div class="box-title"><h2>Новая тема мониторинга</h2></div><form id="media-form" class="form-grid"><label class="field-label">Вопрос или поисковая тема<input name="question" maxlength="240" required placeholder="Например: городские парки и качество жизни"></label><div class="form-two"><label class="field-label">Хэштег Mastodon (необязательно)<input name="hashtag" maxlength="60" placeholder="город"></label><label class="field-label">Интервал, минут<input name="interval_minutes" type="number" min="15" max="1440" value="30" required></label></div><button class="btn" type="submit">Начать наблюдение</button></form><p class="muted">Агенты: новости Google News RSS, публичный хэштег Mastodon и сводка по найденным публикациям. Источники могут быть недоступны или не содержать публикаций по теме. Данные собираются сервером по расписанию.</p></section><div class="media-grid"><section class="box"><h2>Темы</h2><div class="media-list" id="media-topics">Загружаем…</div></section><section class="box" id="media-detail">Выберите тему.</section></div>`;
+    }
+    async function loadMedia() {
+      const list = document.querySelector('#media-topics');
+      if (!list) return;
+      document.querySelector('#media-form').onsubmit = async event => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector('button'); button.disabled = true;
+        try {
+          const values = Object.fromEntries(new FormData(event.currentTarget));
+          const result = await api('/media','POST',{...values,interval_minutes:Number(values.interval_minutes)});
+          mediaSelected = result.id; event.currentTarget.reset(); await loadMedia(); notify('Тема добавлена');
+        } catch (error) { notify(error.message,true); } finally { if (button.isConnected) button.disabled = false; }
+      };
+      try {
+        const {monitors,agents} = await api('/media');
+        if (!list.isConnected || state.tab !== 'media') return;
+        list.innerHTML = monitors.length ? monitors.map(m => `<div class="media-topic"><strong>${esc(m.question)}</strong><small>${m.enabled ? '● Работает' : '○ На паузе'} · каждые ${m.interval_minutes} мин · ${esc(m.hashtag ? '#'+m.hashtag : 'только СМИ')}</small><br><button type="button" class="btn small secondary" data-media-id="${m.id}">Открыть</button></div>`).join('') : '<p class="muted">Тем пока нет.</p>';
+        list.querySelectorAll('[data-media-id]').forEach(button => button.onclick = () => { mediaSelected = Number(button.dataset.mediaId); loadMediaDetail(mediaSelected); });
+        if (!monitors.some(m => m.id === mediaSelected)) mediaSelected = monitors[0]?.id || null;
+        document.querySelector('#media-detail').innerHTML = `<p class="muted">${agents.map(esc).join(' · ')}</p>`;
+        if (mediaSelected) await loadMediaDetail(mediaSelected);
+      } catch (error) { if (list.isConnected) list.textContent = `Не удалось загрузить мониторинг: ${error.message}`; }
+    }
+    async function loadMediaDetail(id) {
+      const box = document.querySelector('#media-detail');
+      if (!box) return;
+      try {
+        const {monitor,summary,items} = await api(`/media/${id}`);
+        if (!box.isConnected || mediaSelected !== id) return;
+        const status = monitor.last_result || {};
+        box.innerHTML = `<h2>${esc(monitor.question)}</h2><p class="muted">Последняя проверка: ${monitor.last_run ? date(monitor.last_run) : 'ещё не запускалась'} · Следующая: ${date(monitor.next_run)} · ${monitor.enabled ? 'Работает' : 'Пауза'}</p><p>Материалов: <strong>${summary.total}</strong> · СМИ: ${summary.news} · соцсети: ${summary.social}</p><p class="muted">Частые слова: ${summary.terms.map(t => `${esc(t.word)} (${t.count})`).join(', ') || 'пока нет'}</p><p class="muted">СМИ: ${esc(status.news || 'ожидает')} · Соцсети: ${esc(status.social || 'ожидает')}</p><div class="slide-tools"><button class="btn small" id="media-run">Проверить сейчас</button><button class="btn small secondary" id="media-toggle">${monitor.enabled ? 'Пауза' : 'Возобновить'}</button><button class="text-button" id="media-remove">Удалить</button>${['csv','json','md'].map(ext => `<a class="btn small secondary" href="/api/media/${id}/export.${ext}">${ext.toUpperCase()} ↓</a>`).join('')}</div><h3>Последние публикации</h3>${items.slice(0,100).map(item => `<article class="media-entry"><strong>${esc(item.title)}</strong><small>${item.source === 'social' ? 'Соцсеть' : 'СМИ'} · ${esc(item.published || item.collected_at)}</small><p>${esc(item.excerpt)}</p><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">Открыть публикацию ↗</a></article>`).join('') || '<p class="muted">Публикаций ещё нет. Запустите проверку или дождитесь следующего цикла.</p>'}${items.length > 100 ? '<p class="muted">Показаны 100 последних материалов; все сохранённые материалы доступны в экспорте.</p>' : ''}`;
+        box.querySelector('#media-run').onclick = async event => {
+          const button = event.currentTarget; button.disabled = true;
+          try { await api(`/media/${id}/run`,'POST',{}); await loadMediaDetail(id); notify('Проверка завершена'); }
+          catch (error) { notify(error.message,true); button.disabled = false; }
+        };
+        box.querySelector('#media-toggle').onclick = async () => { try { await api(`/media/${id}`,'PATCH',{enabled:!monitor.enabled}); await loadMedia(); } catch (error) { notify(error.message,true); } };
+        box.querySelector('#media-remove').onclick = async () => { if (confirm('Удалить тему вместе с собранными публикациями?')) { try { await api(`/media/${id}`,'DELETE'); mediaSelected = null; await loadMedia(); } catch (error) { notify(error.message,true); } } };
+      } catch (error) { if (box.isConnected) box.textContent = `Ошибка: ${error.message}`; }
+    }
+    setInterval(() => { if (state.tab === 'media' && !state.offline && state.selected == null) loadMedia(); }, 60000);
     function renderCalendar() {
       return heading('Планирование','Календарь задач','Задачи, сроки и документы лаборатории по датам.',!state.offline ? '<button class="btn" data-action="new-task">+ Добавить задачу</button>' : '') +
         `<section class="box"><div class="calendar-toolbar"><button class="btn small secondary" data-action="calendar-month" data-step="-1" aria-label="Предыдущий месяц">←</button><strong>${new Date(calendarState.month+'-01T12:00:00').toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</strong><button class="btn small secondary" data-action="calendar-month" data-step="1" aria-label="Следующий месяц">→</button></div><div id="calendar-data">${state.offline ? '<p class="muted">Календарь доступен при подключении к серверу.</p>' : '<p class="muted">Загружаем задачи…</p>'}</div></section>`;
