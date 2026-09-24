@@ -83,6 +83,13 @@ class PlannerTest(unittest.TestCase):
         status, data = self.request(self.admin, "/media", "POST", {"question": "городские парки", "hashtag": "парки", "countries": ["RU", "US"]})
         self.assertEqual(status, 201)
         mid = data["id"]
+        many_links = "\n".join(f"https://vk.com/club{i}" for i in range(21))
+        many_status, many_data = self.request(self.admin, "/media", "POST", {
+            "question": "Много сообществ", "region": "Россия", "group_links": many_links, "countries": ["RU"]})
+        self.assertEqual(many_status, 201)
+        self.assertEqual(len(self.request(self.admin, "/media")[1]["monitors"]), 2)
+        self.assertEqual(self.request(self.admin, f"/media/{many_data['id']}")[1]["monitor"]["vk_group_links"],
+                         [f"https://vk.com/club{i}" for i in range(21)])
         self.assertEqual(self.request(self.admin, f"/media/{mid}")[1]["summary"]["total"], 0)
 
         def fake_fetch(url):

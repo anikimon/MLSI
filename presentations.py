@@ -33,7 +33,8 @@ MODERN_LAYOUT = {"cover": {"title": {"x": 9, "y": 23, "w": 77, "h": 25},
                  "content": {"title": {"x": 9, "y": 16, "w": 81, "h": 15},
                              "body": {"x": 10, "y": 38, "w": 79, "h": 49}},
                  "closing": {"title": {"x": 9, "y": 17, "w": 81, "h": 16},
-                             "body": {"x": 10, "y": 39, "w": 79, "h": 48}}}
+                              "body": {"x": 10, "y": 39, "w": 79, "h": 48}}}
+DEFAULT_DECORATIONS = ["panel", "stripe", "shape", "pill", "rule", "page"]
 
 
 def hex_color(color):
@@ -98,10 +99,15 @@ def validate_deck(deck):
             design = slide["design"]
             if not isinstance(design, dict) or design.get("variant") not in ("cover", "content", "closing") or design.get("layout", "classic") not in ("classic", "split", "spotlight"):
                 raise ValueError("Некорректное оформление слайда")
+            decorations = design.get("decorations", DEFAULT_DECORATIONS)
+            if (not isinstance(decorations, list) or any(item not in DEFAULT_DECORATIONS for item in decorations) or
+                    len(set(decorations)) != len(decorations)):
+                raise ValueError("Некорректные элементы оформления")
             cleaned_slide["design"] = {"variant": design["variant"],
                                         "panel": hex_color(design.get("panel")),
                                         "soft": hex_color(design.get("soft")),
-                                        "accent": hex_color(design.get("accent"))}
+                                        "accent": hex_color(design.get("accent")),
+                                        "decorations": decorations}
             if "layout" in design:
                 cleaned_slide["design"]["layout"] = design["layout"]
         cleaned["slides"].append(cleaned_slide)
@@ -258,10 +264,11 @@ def deck_from_outline(outline, count, colors, template=None):
                 elements[-1].update(x=11, y=38, w=76, h=23)
                 elements[-1]["style"]["size"] = 24
         slide = {"elements": elements, "background": background,
-                  "design": {"variant": variant, "accent": colors["accent"],
-                             "layout": layout,
-                             "panel": _blend(background, "#ffffff" if dark else colors["accent"], .10 if dark else .045),
-                            "soft": _blend(background, "#ffffff" if dark else colors["accent"], .18 if dark else .10)}}
+                   "design": {"variant": variant, "accent": colors["accent"],
+                              "layout": layout,
+                              "panel": _blend(background, "#ffffff" if dark else colors["accent"], .10 if dark else .045),
+                             "soft": _blend(background, "#ffffff" if dark else colors["accent"], .18 if dark else .10),
+                             "decorations": DEFAULT_DECORATIONS.copy()}}
         slides.append(slide)
     return validate_deck({"colors": colors, "slides": slides})
 
@@ -317,27 +324,43 @@ def pptx_bytes(deck):
 
             variant = design["variant"]
             layout = design.get("layout", "classic")
+            decorations_enabled = set(design.get("decorations", DEFAULT_DECORATIONS))
             background = item.get("background", deck["colors"]["background"])
             if variant == "cover":
-                decoration(MSO_SHAPE.OVAL, 70, -18, 50, 89, design["panel"])
-                decoration(MSO_SHAPE.OVAL, 80, 3, 30, 54, design["soft"])
-                decoration(MSO_SHAPE.RECTANGLE, 7, 23, .7, 53, design["accent"])
+                if "shape" in decorations_enabled:
+                    decoration(MSO_SHAPE.OVAL, 70, -18, 50, 89, design["panel"])
+                    decoration(MSO_SHAPE.OVAL, 80, 3, 30, 54, design["soft"])
+                if "stripe" in decorations_enabled:
+                    decoration(MSO_SHAPE.RECTANGLE, 7, 23, .7, 53, design["accent"])
             elif layout == "split":
-                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
-                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 52, 35, 40, 54, design["soft"])
-                decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
+                if "panel" in decorations_enabled:
+                    decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
+                if "shape" in decorations_enabled:
+                    decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 52, 35, 40, 54, design["soft"])
+                if "stripe" in decorations_enabled:
+                    decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
             elif layout == "spotlight":
-                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
-                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 8, 34, 84, 29, design["soft"])
-                decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
+                if "panel" in decorations_enabled:
+                    decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
+                if "shape" in decorations_enabled:
+                    decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 8, 34, 84, 29, design["soft"])
+                if "stripe" in decorations_enabled:
+                    decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
             else:
-                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
-                decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
-                decoration(MSO_SHAPE.OVAL, 91, 8, 3, 5.3, design["soft"])
-            decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 8, 4, 46, 8, design["soft"])
-            if layout == "classic" and any(element["kind"] == "callout" for element in item["elements"]):
+                if "panel" in decorations_enabled:
+                    decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
+                if "stripe" in decorations_enabled:
+                    decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
+                if "shape" in decorations_enabled:
+                    decoration(MSO_SHAPE.OVAL, 91, 8, 3, 5.3, design["soft"])
+            if "pill" in decorations_enabled:
+                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 8, 4, 46, 8, design["soft"])
+            if "panel" in decorations_enabled and layout == "classic" and any(element["kind"] == "callout" for element in item["elements"]):
                 decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 9, 76, 82, 13, design["soft"])
-            decoration(MSO_SHAPE.RECTANGLE, 9, 92, 82, .25, design["soft"])
+            if "rule" in decorations_enabled:
+                decoration(MSO_SHAPE.RECTANGLE, 9, 92, 82, .25, design["soft"])
+            if "page" not in decorations_enabled:
+                continue
             footer = slide.shapes.add_textbox(int(presentation.slide_width*.87),
                                                int(presentation.slide_height*.93),
                                                int(presentation.slide_width*.07),

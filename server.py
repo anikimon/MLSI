@@ -1478,6 +1478,7 @@ class Handler(BaseHTTPRequestHandler):
                     monitor["last_result"] = json.loads(monitor["last_result"])
                 for monitor in monitors:
                     monitor["countries"] = json.loads(monitor["countries"])
+                    monitor["vk_group_links"] = json.loads(monitor.get("vk_group_links") or "[]")
                 self.send_json(200, {"monitors": monitors, "agents": AGENTS,
                                      "available_countries": [{"code": code, "name": info[0]} for code, info in COUNTRIES.items()]})
                 return
@@ -1489,8 +1490,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(raw_links, str):
                     raise ApiError(400, "Ссылки на группы должны быть текстом")
                 group_links = [link.strip() for link in raw_links.splitlines() if link.strip()]
-                if len(group_links) > 20 or any(not re.fullmatch(r"https?://(?:www\.)?vk\.com/(?:club|public|group)?[A-Za-z0-9_.-]+/?", link, re.I) for link in group_links):
-                    raise ApiError(400, "Укажите до 20 корректных ссылок на группы VK, по одной на строку")
+                if any(not re.fullmatch(r"https?://(?:www\.)?vk\.com/(?:club|public|group)?[A-Za-z0-9_.-]+/?", link, re.I) for link in group_links):
+                    raise ApiError(400, "Укажите корректные ссылки на группы VK, по одной на строку")
                 hashtag = data.get("hashtag", "")
                 if not isinstance(hashtag, str) or not re.fullmatch(r"#?[\wа-яА-ЯёЁ]{0,60}", hashtag):
                     raise ApiError(400, "Укажите один хэштег без пробелов или оставьте поле пустым")
@@ -1540,9 +1541,12 @@ class Handler(BaseHTTPRequestHandler):
                 item_type, author, community, engagement
                 FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000""", (monitor_id,))]
             selected = json.loads(row["countries"])
+            monitor = {**dict(row), "countries": selected,
+                       "vk_group_links": json.loads(row["vk_group_links"] or "[]"),
+                       "last_result": json.loads(row["last_result"])}
             summary = summarize_media(rows, selected or ["RU"])
             if action is None or action == "export.json":
-                result = {"monitor": {**dict(row), "countries": selected, "last_result": json.loads(row["last_result"])},
+                result = {"monitor": monitor,
                           "summary": summary, "items": rows, "agents": AGENTS}
                 if action is None:
                     self.send_json(200, result)

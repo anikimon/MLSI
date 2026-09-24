@@ -434,7 +434,7 @@
     function renderMedia() {
       if (state.offline) return heading('Публичные источники','Медиаанализ','Для мониторинга требуется подключение к серверу.') + empty('Нет подключения','Подключитесь к серверу и откройте раздел снова.');
        return heading('Публичные сообщества VK','Социальный анализ','Задайте исследовательский вопрос и регион — система найдёт публичные сообщества VK, изучит посты и комментарии и подготовит аналитический отчёт.') +
-          `<section class="box"><div class="box-title"><h2>Новое исследование VK</h2></div><form id="media-form" class="form-grid"><label class="field-label">Исследовательский вопрос<input name="question" maxlength="240" required placeholder="Что сейчас обсуждают жители региона?"></label><label class="field-label">Регион работы сообществ<input name="region" maxlength="180" required placeholder="Например: Луганская Народная Республика"></label><label class="field-label">Ссылки на группы VK <span class="muted">необязательно</span><textarea name="group_links" maxlength="4000" rows="3" placeholder="По одной ссылке на строку: https://vk.com/club123"></textarea></label><label class="field-label">Интервал обновления, минут<input name="interval_minutes" type="number" min="15" max="1440" value="60" required></label><button class="btn" type="submit">Начать VK-анализ</button></form><p class="muted">Если ссылки указаны, система проверяет именно эти публичные группы, а затем дополняет их автоматическим поиском. Нужна переменная VK_ACCESS_TOKEN. ИИ отделяет факты от гипотез и прикладывает ссылки на исходные материалы.</p></section><div class="media-grid"><section class="box"><h2>Исследования</h2><div class="media-list" id="media-topics">Загружаем…</div></section><section class="box" id="media-detail">Выберите исследование.</section></div>`;
+          `<section class="box"><div class="box-title"><h2>Новое исследование VK</h2></div><form id="media-form" class="form-grid"><label class="field-label">Исследовательский вопрос<input name="question" maxlength="240" required placeholder="Что сейчас обсуждают жители региона?"></label><label class="field-label">Регион работы сообществ<input name="region" maxlength="180" required placeholder="Например: Луганская Народная Республика"></label><label class="field-label">Ссылки на группы VK <span class="muted">необязательно</span><textarea name="group_links" rows="3" placeholder="По одной ссылке на строку: https://vk.com/club123"></textarea></label><label class="field-label">Интервал обновления, минут<input name="interval_minutes" type="number" min="15" max="1440" value="60" required></label><button class="btn" type="submit">Начать VK-анализ</button></form><p class="muted">Если ссылки указаны, система проверяет эти публичные группы, а затем дополняет их автоматическим поиском. Можно указать любое количество сообществ. Нужна переменная VK_ACCESS_TOKEN. ИИ отделяет факты от гипотез и прикладывает ссылки на исходные материалы.</p></section><div class="media-grid"><section class="box"><h2>Исследования</h2><div class="media-list" id="media-topics">Загружаем…</div></section><section class="box" id="media-detail">Выберите исследование.</section></div>`;
     }
     async function loadMedia() {
       const list = document.querySelector('#media-topics');
@@ -1130,21 +1130,25 @@
             const node = document.createElement('div'); node.className = `slide-decoration ${klass}`;
             node.style.backgroundColor = color; stage.append(node);
           };
-          if (design.variant === 'cover') {
-            decoration('cover-orb',design.panel); decoration('cover-orb-inner',design.soft);
-            decoration('cover-stripe',design.accent);
-           } else {
-             decoration('card',design.panel); decoration('stripe',design.accent);
-             if (design.layout === 'split') decoration('split-panel',design.soft);
-             else if (design.layout === 'spotlight') decoration('spotlight-panel',design.soft);
-             else decoration('dot',design.soft);
+           const ornaments = new Set(design.decorations || ['panel','stripe','shape','pill','rule','page']);
+           if (design.variant === 'cover') {
+             if (ornaments.has('shape')) { decoration('cover-orb',design.panel); decoration('cover-orb-inner',design.soft); }
+             if (ornaments.has('stripe')) decoration('cover-stripe',design.accent);
+            } else {
+             if (ornaments.has('panel')) decoration('card',design.panel);
+             if (ornaments.has('stripe')) decoration('stripe',design.accent);
+             if (ornaments.has('shape')) {
+               if (design.layout === 'split') decoration('split-panel',design.soft);
+               else if (design.layout === 'spotlight') decoration('spotlight-panel',design.soft);
+               else decoration('dot',design.soft);
+             }
            }
-           decoration('pill',design.soft);
-           if ((!design.layout || design.layout === 'classic') && elements.some(element => element.kind === 'callout')) decoration('callout-card',design.soft);
-          decoration('rule',design.soft);
-          const page = document.createElement('span'); page.className = 'slide-page';
-          page.textContent = `${String(Number(select.value)+1).padStart(2,'0')} / ${String(presentationDeck.slides.length).padStart(2,'0')}`;
-          page.style.color = design.accent; stage.append(page);
+           if (ornaments.has('pill')) decoration('pill',design.soft);
+           if (ornaments.has('panel') && (!design.layout || design.layout === 'classic') && elements.some(element => element.kind === 'callout')) decoration('callout-card',design.soft);
+           if (ornaments.has('rule')) decoration('rule',design.soft);
+           if (ornaments.has('page')) { const page = document.createElement('span'); page.className = 'slide-page';
+             page.textContent = `${String(Number(select.value)+1).padStart(2,'0')} / ${String(presentationDeck.slides.length).padStart(2,'0')}`;
+             page.style.color = design.accent; stage.append(page); }
         }
         elements.forEach((element,i) => {
           const node = document.createElement('div');
@@ -1172,7 +1176,10 @@
       };
       const showEditor = () => {
         const slide = presentationDeck.slides[Number(select.value)], element = slide.elements[selected];
-         editor.innerHTML = `<label class="field-label" for="slide-text">${({title:'Заголовок',body:'Текст',tag:'Ярлычок',callout:'Главный вывод'})[element.kind]} — объект ${selected+1}</label><textarea id="slide-text" maxlength="1200"></textarea><div class="presentation-fields"><label class="field-label">Размер текста<input id="slide-font-size" type="number" min="8" max="64" step=".5" value="${element.style?.size || (element.kind === 'title' ? 28 : 17)}"></label><label class="field-label">Цвет текста<input id="slide-font-color" type="color" value="${element.style?.color || (element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text)}"></label><label class="field-label">Фон слайда<input id="slide-background" type="color" value="${slide.background || presentationDeck.colors.background}"></label></div>${slide.design && slide.design.variant === 'content' ? `<label class="field-label">Компоновка слайда<select id="slide-layout"><option value="classic">Классическая карточка</option><option value="split" ${!slide.elements.some(e => e.kind === 'callout') ? 'disabled' : ''}>Две колонки</option><option value="spotlight" ${!slide.elements.some(e => e.kind === 'callout') ? 'disabled' : ''}>Крупный вывод</option></select></label>` : ''}`;
+          const currentStyle = element.style || {font:element.kind === 'title' ? 'Aptos Display' : 'Aptos',size:element.kind === 'title' ? 28 : 17,bold:element.kind === 'title',color:element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text};
+          const fontOptions = ['Aptos','Aptos Display','Arial','Calibri','Georgia','Inter','Times New Roman','Verdana'];
+          const decorationOptions = [['panel','Карточка'],['stripe','Акцентная полоса'],['shape','Форма'],['pill','Плашка'],['rule','Разделитель'],['page','Номер страницы']];
+          editor.innerHTML = `<label class="field-label" for="slide-text">${({title:'Заголовок',body:'Текст',tag:'Ярлычок',callout:'Главный вывод'})[element.kind]} — объект ${selected+1}</label><textarea id="slide-text" maxlength="1200"></textarea><div class="presentation-fields"><label class="field-label">Шрифт<select id="slide-font-family">${fontOptions.map(font => `<option value="${font}" ${currentStyle.font === font ? 'selected' : ''}>${font}</option>`).join('')}</select></label><label class="field-label">Размер текста<input id="slide-font-size" type="number" min="8" max="64" step=".5" value="${currentStyle.size}"></label><label class="field-label">Цвет текста<input id="slide-font-color" type="color" value="${currentStyle.color}"></label><label class="check-label"><input id="slide-font-bold" type="checkbox" ${currentStyle.bold ? 'checked' : ''}> Жирный текст</label><label class="field-label">Фон слайда<input id="slide-background" type="color" value="${slide.background || presentationDeck.colors.background}"></label></div>${slide.design && slide.design.variant === 'content' ? `<label class="field-label">Компоновка слайда<select id="slide-layout"><option value="classic">Классическая карточка</option><option value="split" ${!slide.elements.some(e => e.kind === 'callout') ? 'disabled' : ''}>Две колонки</option><option value="spotlight" ${!slide.elements.some(e => e.kind === 'callout') ? 'disabled' : ''}>Крупный вывод</option></select></label>` : ''}${slide.design ? `<div class="presentation-fields"><span class="field-label">Элементы оформления</span>${decorationOptions.map(([key,label]) => `<label class="check-label"><input class="slide-decoration-toggle" data-decoration="${key}" type="checkbox" ${(slide.design.decorations || ['panel','stripe','shape','pill','rule','page']).includes(key) ? 'checked' : ''}> ${label}</label>`).join('')}</div>` : ''}`;
          if (editor.querySelector('#slide-layout')) {
            editor.querySelector('#slide-layout').value = slide.design.layout || 'classic';
            editor.querySelector('#slide-layout').onchange = event => {
@@ -1187,7 +1194,9 @@
          }
         const input = editor.querySelector('textarea'); input.value = element.text;
         input.oninput = () => { element.text = input.value; stage.querySelector(`[data-element-index="${selected}"]`).textContent = input.value; };
-        const style = () => element.style ||= {font:'Aptos',size:element.kind === 'title' ? 28 : 17,bold:element.kind === 'title',color:element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text};
+         const style = () => element.style ||= {font:'Aptos',size:element.kind === 'title' ? 28 : 17,bold:element.kind === 'title',color:element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text};
+         editor.querySelector('#slide-font-family').onchange = event => { style().font = event.target.value; show(); };
+         editor.querySelector('#slide-font-bold').onchange = event => { style().bold = event.target.checked; show(); };
         editor.querySelector('#slide-font-size').onchange = event => {
           const size = Number(event.target.value);
           if (!Number.isFinite(size) || size < 8 || size > 64) { notify('Размер шрифта: от 8 до 64',true); return; }
@@ -1195,7 +1204,7 @@
         };
         editor.querySelector('#slide-font-color').oninput = event => { style().color = event.target.value; stage.querySelector(`[data-element-index="${selected}"]`).style.color = event.target.value; };
         editor.querySelector('#slide-background').oninput = event => { slide.background = event.target.value; stage.style.backgroundColor = event.target.value; };
-        editor.querySelector('#slide-background').onchange = () => {
+         editor.querySelector('#slide-background').onchange = () => {
           if (slide.design) {
             const blend = (from,to,ratio) => '#' + [1,3,5].map(i => Math.round(parseInt(from.slice(i,i+2),16)*(1-ratio) + parseInt(to.slice(i,i+2),16)*ratio).toString(16).padStart(2,'0')).join('');
             const dark = [0.2126,0.7152,0.0722].reduce((sum,weight,i) => sum + parseInt(slide.background.slice(1+i*2,3+i*2),16)*weight,0) < 145;
@@ -1203,8 +1212,12 @@
             slide.design.panel = blend(slide.background,target,dark ? .10 : .045);
             slide.design.soft = blend(slide.background,target,dark ? .18 : .10);
           }
-          show();
-        };
+           show();
+         };
+         editor.querySelectorAll('.slide-decoration-toggle').forEach(input => input.onchange = () => {
+           slide.design.decorations = [...editor.querySelectorAll('.slide-decoration-toggle:checked')].map(item => item.dataset.decoration);
+           show();
+         });
       };
        select.onchange = () => { selected = 0; show(); };
        container.querySelector('#slide-theme').onchange = event => {
