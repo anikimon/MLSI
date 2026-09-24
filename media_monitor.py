@@ -87,15 +87,32 @@ def vk_api(method, params):
 
 def vk_agent(question, region=""):
     """Collect public VK communities, posts and a bounded sample of comments."""
-    query = " ".join(part for part in (question, region) if part).strip()
-    groups = vk_api("groups.search", {"q": query, "count": 12, "type": "group", "sort": 0}).get("items", [])
+    queries = []
+    for query in (region, question, " ".join(part for part in (question, region) if part)):
+        query = str(query or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    groups = []
+    seen_groups = set()
+    for query in queries:
+        found = vk_api("groups.search", {"q": query, "count": 12, "type": "group", "sort": 0}).get("items", [])
+        for group in found:
+            group_id = int(group.get("id", 0))
+            if group_id and group_id not in seen_groups:
+                seen_groups.add(group_id)
+                groups.append(group)
+        if len(groups) >= 12:
+            break
     records = []
     for group in groups[:12]:
         group_id = int(group.get("id", 0))
         if not group_id:
             continue
         slug = group.get("screen_name") or str(group_id)
-        wall = vk_api("wall.get", {"owner_id": -group_id, "count": 20, "filter": "owner"}).get("items", [])
+        try:
+            wall = vk_api("wall.get", {"owner_id": -group_id, "count": 20, "filter": "owner"}).get("items", [])
+        except (ValueError, OSError, TypeError, json.JSONDecodeError):
+            continue
         for post in wall[:20]:
             post_id = int(post.get("id", 0))
             text = clean_markup(post.get("text", ""))[:900]
@@ -107,8 +124,11 @@ def vk_agent(question, region=""):
                             "community": clean_markup(group.get("name", ""))[:180], "region": region[:180],
                             "author": clean_markup(group.get("name", ""))[:180],
                             "engagement": int(post.get("comments", {}).get("count", 0)) + int(post.get("likes", {}).get("count", 0))})
-            comments = vk_api("wall.getComments", {"owner_id": -group_id, "post_id": post_id, "count": 20,
-                                                       "sort": "desc", "preview_length": 0}).get("items", [])
+            try:
+                comments = vk_api("wall.getComments", {"owner_id": -group_id, "post_id": post_id, "count": 20,
+                                                           "sort": "desc", "preview_length": 0}).get("items", [])
+            except (ValueError, OSError, TypeError, json.JSONDecodeError):
+                comments = []
             for comment in comments[:20]:
                 comment_text = clean_markup(comment.get("text", ""))[:900]
                 if not comment_text:

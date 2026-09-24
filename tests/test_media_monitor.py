@@ -1,8 +1,9 @@
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from media_monitor import collect, summarize
+from media_monitor import collect, summarize, vk_agent
 
 
 class SummaryTest(unittest.TestCase):
@@ -50,6 +51,26 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(added, 1)
         self.assertEqual(result["social"], "vk: Добавлено: 1")
         self.assertEqual(summarize(rows)["sentiment"]["positive"], 1)
+
+    def test_vk_search_uses_region_first_and_keeps_posts_when_comments_fail(self):
+        calls = []
+
+        def fake_api(method, params):
+            calls.append((method, params))
+            if method == "groups.search":
+                return {"items": [{"id": 7, "screen_name": "region_news", "name": "Новости региона"}]}
+            if method == "wall.get":
+                return {"items": [{"id": 11, "text": "В регионе обсуждают важное событие",
+                                    "date": 1, "comments": {"count": 2}, "likes": {"count": 3}}]}
+            raise ValueError("комментарии закрыты")
+
+        with patch("media_monitor.vk_api", side_effect=fake_api):
+            records = vk_agent("события", "Луганская Народная Республика")
+
+        self.assertEqual(records[0]["item_type"], "post")
+        self.assertEqual(records[0]["community"], "Новости региона")
+        self.assertEqual(calls[0][0], "groups.search")
+        self.assertEqual(calls[0][1]["q"], "Луганская Народная Республика")
 
 
 if __name__ == "__main__":
