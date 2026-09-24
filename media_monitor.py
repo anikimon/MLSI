@@ -2,6 +2,7 @@
 
 import html
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -11,7 +12,7 @@ from datetime import datetime, timezone
 
 
 MAX_RESPONSE = 1024 * 1024
-AGENTS = ("СМИ · Google News RSS", "Соцсети · Mastodon", "Соцсети · Bluesky", "Аналитик · сводка")
+AGENTS = ("СМИ · Google News RSS", "Соцсети · Mastodon", "Соцсети · Bluesky", "Соцсети · VK (нужен VK_ACCESS_TOKEN)", "Аналитик · сводка")
 STOP = {"это", "как", "что", "для", "или", "при", "про", "the", "and", "with", "from", "сми", "новости"}
 COUNTRIES = {
     "US": ("США", "en", "United States", "США", "United States", "USA"),
@@ -30,6 +31,12 @@ COUNTRIES = {
     "KR": ("Южная Корея", "ko", "South Korea", "Южная Корея", "South Korea"),
     "MX": ("Мексика", "es-419", "Mexico", "Мексика", "Mexico"),
     "ZA": ("ЮАР", "en", "South Africa", "ЮАР", "South Africa"),
+}
+# Approximate marker positions for a compact narrative map (longitude, latitude).
+MAP_COORDS = {
+    "US": (-100, 38), "GB": (-3, 55), "FR": (2, 46), "DE": (10, 51), "RU": (90, 60),
+    "UA": (32, 49), "CN": (105, 35), "IN": (79, 22), "JP": (138, 36), "BR": (-52, -10),
+    "TR": (35, 39), "IL": (35, 31), "IR": (53, 32), "KR": (127, 36), "MX": (-102, 23), "ZA": (24, -30),
 }
 TOPICS = {
     "Конфликты и безопасность": ("war", "attack", "strike", "military", "missile", "войн", "атак", "удар", "военн", "ракета", "guerre", "krieg"),
@@ -64,6 +71,55 @@ def fetch(url):
     if len(content) > MAX_RESPONSE:
         raise ValueError("Источник вернул слишком большой ответ")
     return content
+
+
+def vk_api(method, params):
+    token = os.environ.get("VK_ACCESS_TOKEN", "").strip()
+    if not token:
+        raise ValueError("VK_ACCESS_TOKEN не настроен")
+    query = {**params, "access_token": token, "v": "5.199"}
+    data = json.loads(fetch("https://api.vk.com/method/" + method + "?" + urllib.parse.urlencode(query)))
+    if not isinstance(data, dict) or "error" in data:
+        error = data.get("error", {}) if isinstance(data, dict) else {}
+        raise ValueError("VK API: " + str(error.get("error_msg", "неожиданный ответ"))[:120])
+    return data.get("response", {})
+
+
+def vk_agent(question):
+    """Collect public VK communities, posts and a bounded sample of comments."""
+    groups = vk_api("groups.search", {"q": question, "count": 8, "type": "group", "sort": 0}).get("items", [])
+    records = []
+    for group in groups[:8]:
+        group_id = int(group.get("id", 0))
+        if not group_id:
+            continue
+        slug = group.get("screen_name") or str(group_id)
+        wall = vk_api("wall.get", {"owner_id": -group_id, "count": 12, "filter": "owner"}).get("items", [])
+        for post in wall[:12]:
+            post_id = int(post.get("id", 0))
+            text = clean_markup(post.get("text", ""))[:900]
+            if not post_id or not text:
+                continue
+            url = f"https://vk.com/{slug}?w=wall-{group_id}_{post_id}"
+            records.append({"source": "vk", "title": text[:180], "excerpt": text, "url": url,
+                            "published": str(post.get("date", ""))[:100], "item_type": "post",
+                            "community": clean_markup(group.get("name", ""))[:180],
+                            "author": clean_markup(group.get("name", ""))[:180],
+                            "engagement": int(post.get("comments", {}).get("count", 0)) + int(post.get("likes", {}).get("count", 0))})
+            comments = vk_api("wall.getComments", {"owner_id": -group_id, "post_id": post_id, "count": 20,
+                                                       "sort": "desc", "preview_length": 0}).get("items", [])
+            for comment in comments[:20]:
+                comment_text = clean_markup(comment.get("text", ""))[:900]
+                if not comment_text:
+                    continue
+                profile_id = int(comment.get("from_id", 0))
+                records.append({"source": "vk", "title": comment_text[:180], "excerpt": comment_text,
+                                "url": url + "&reply=" + str(comment.get("id", "")),
+                                "published": str(comment.get("date", ""))[:100], "item_type": "comment",
+                                "community": clean_markup(group.get("name", ""))[:180],
+                                "author": f"VK user {profile_id}" if profile_id else "VK user",
+                                "engagement": int(comment.get("likes", {}).get("count", 0))})
+    return records
 
 
 def news_agent(question, country="RU"):
@@ -198,14 +254,32 @@ def summarize(rows, countries=()):
     for code in selected:
         items = [row for row in rows if row.get("country") == code]
         by_country.append({"code": code, "name": COUNTRIES[code][0], "total": len(items), **overview(items)})
+    narrative_counts = Counter(theme["name"] for theme in overview(rows)["themes"])
+    narratives = [{"name": name, "count": count, "share": round(count / len(rows) * 100, 1) if rows else 0}
+                  for name, count in narrative_counts.most_common()]
+    social_text = " ".join(row["title"] + " " + row.get("excerpt", "") for row in rows if row.get("source") in ("social", "vk")).lower()
+    SOCIAL_GROUPS = {
+        "Страхи": ("страш", "боят", "опасн", "угроз", "страдан", "fear", "afraid", "danger", "worry"),
+        "Потребности": ("нужн", "требу", "хотим", "нужда", "need", "want", "require", "support"),
+        "Недовольство": ("плох", "ужас", "ненавиж", "долг", "коррупц", "bad", "hate", "corrupt", "expensive"),
+        "Решения и инициативы": ("предлаг", "решен", "помощ", "инициатив", "вместе", "solution", "help", "initiative"),
+    }
+    social_analysis = []
+    for label, stems in SOCIAL_GROUPS.items():
+        hits = sum(1 for row in rows if row.get("source") in ("social", "vk") and any(stem in (row["title"] + " " + row.get("excerpt", "")).lower() for stem in stems))
+        if hits:
+            social_analysis.append({"name": label, "count": hits, "share": round(hits / max(1, sum(row.get("source") in ("social", "vk") for row in rows)) * 100, 1)})
+    persons = Counter(row.get("author", "") for row in rows if row.get("author") and row.get("source") == "vk")
     return {"total": len(rows), "news": counts["news"], "social": counts["social"],
             "terms": [{"word": word, "count": count} for word, count in words.most_common(10)],
-            "overall": overview(rows), "countries": by_country,
+            "overall": overview(rows), "countries": by_country, "narratives": narratives,
+            "social_analysis": social_analysis, "vk_communities": Counter(row.get("community", "") for row in rows if row.get("community")).most_common(10),
+            "vk_persons": [{"name": name, "count": count} for name, count in persons.most_common(10)],
             "unassigned_social": sum(row["source"] == "social" and not row.get("country") for row in rows),
             "calculated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
-def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch_bluesky=bluesky_agent):
+def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch_bluesky=bluesky_agent, fetch_vk=vk_agent):
     """Each collector fails independently; previously saved observations remain available."""
     results = {}
     new_count = 0
@@ -215,6 +289,8 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
     searches = [("news", fetch_news, (monitor["question"], code), code) for code in (countries or ["RU"])]
     searches.append(("social", fetch_social, (monitor["question"], monitor["hashtag"]), "mastodon"))
     searches.append(("social", fetch_bluesky, (monitor["question"],), "bluesky"))
+    if monitor.get("vk_query", monitor["question"]):
+        searches.append(("vk", fetch_vk, (monitor.get("vk_query") or monitor["question"],), "vk"))
     for name, agent, args, code in searches:
         label = f"news:{code}" if countries and name == "news" else (code if name == "social" else name)
         if code == "mastodon" and not monitor["hashtag"]:
@@ -224,7 +300,7 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
             records = agent(*args)
             if not isinstance(records, list):
                 raise ValueError("Источник вернул некорректный список")
-            batches[label] = (name, "" if name == "social" else code, records[:30])
+            batches[label] = (name, "" if name in ("social", "vk") else code, records[:100])
         except (ValueError, OSError, ET.ParseError, TypeError, json.JSONDecodeError) as exc:
             results[label] = "Ошибка источника: " + str(exc)[:140]
     for label, (name, code, records) in batches.items():
@@ -237,10 +313,12 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
                 if not link or record.get("source") != name:
                     continue
                 cursor = db.execute("""INSERT OR IGNORE INTO media_items
-                    (monitor_id, source, country, title, excerpt, url, published, collected_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (monitor["id"], name, code,
+                    (monitor_id, source, country, title, excerpt, url, published, collected_at, item_type, author, community, engagement)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (monitor["id"], name, code,
                     str(record.get("title", ""))[:350], str(record.get("excerpt", ""))[:900],
-                    link, str(record.get("published", ""))[:100], datetime.now(timezone.utc).isoformat(timespec="seconds")))
+                    link, str(record.get("published", ""))[:100], datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    str(record.get("item_type", "publication"))[:30], str(record.get("author", ""))[:180],
+                    str(record.get("community", ""))[:180], max(0, int(record.get("engagement", 0) or 0))))
                 found += cursor.rowcount
             new_count += found
             results[label] = f"Добавлено: {found}"
@@ -248,5 +326,5 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
             results[label] = "Ошибка источника: " + str(exc)[:140]
     if countries:
         results["news"] = "; ".join(f"{COUNTRIES[code][0]}: {results.get('news:' + code, 'нет данных')}" for code in countries)
-    results["social"] = "; ".join(f"{source}: {results.get(source, 'нет данных')}" for source in ("mastodon", "bluesky"))
+    results["social"] = "; ".join(f"{source}: {results.get(source, 'нет данных')}" for source in ("mastodon", "bluesky", "vk"))
     return new_count, results

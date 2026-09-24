@@ -202,7 +202,7 @@ def init_db(path):
                 content BLOB NOT NULL, created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS media_monitors (
-                id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '',
+                id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '', vk_query TEXT NOT NULL DEFAULT '',
                 countries TEXT NOT NULL DEFAULT '[]',
                 enabled INTEGER NOT NULL DEFAULT 1, interval_minutes INTEGER NOT NULL DEFAULT 30,
                 next_run TEXT NOT NULL, running_until TEXT, last_run TEXT, last_result TEXT NOT NULL DEFAULT '{}'
@@ -211,15 +211,25 @@ def init_db(path):
                 id INTEGER PRIMARY KEY, monitor_id INTEGER NOT NULL REFERENCES media_monitors(id) ON DELETE CASCADE,
                 source TEXT NOT NULL, country TEXT NOT NULL DEFAULT '', title TEXT NOT NULL, excerpt TEXT NOT NULL, url TEXT NOT NULL,
                 published TEXT NOT NULL, collected_at TEXT NOT NULL,
+                item_type TEXT NOT NULL DEFAULT 'publication', author TEXT NOT NULL DEFAULT '',
+                community TEXT NOT NULL DEFAULT '', engagement INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(monitor_id, url)
             );
             CREATE INDEX IF NOT EXISTS media_items_recent ON media_items(monitor_id, id DESC);
             """)
             if "countries" not in {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN countries TEXT NOT NULL DEFAULT '[]'")
+            monitor_columns = {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}
+            if "vk_query" not in monitor_columns:
+                db.execute("ALTER TABLE media_monitors ADD COLUMN vk_query TEXT NOT NULL DEFAULT ''")
             if "country" not in {row["name"] for row in db.execute("PRAGMA table_info(media_items)")}:
                 db.execute("ALTER TABLE media_items ADD COLUMN country TEXT NOT NULL DEFAULT ''")
                 db.execute("UPDATE media_items SET country = 'RU' WHERE source = 'news'")
+            item_columns = {row["name"] for row in db.execute("PRAGMA table_info(media_items)")}
+            for column, definition in (("item_type", "TEXT NOT NULL DEFAULT 'publication'"), ("author", "TEXT NOT NULL DEFAULT ''"),
+                                       ("community", "TEXT NOT NULL DEFAULT ''"), ("engagement", "INTEGER NOT NULL DEFAULT 0")):
+                if column not in item_columns:
+                    db.execute(f"ALTER TABLE media_items ADD COLUMN {column} {definition}")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(responses)")}
             if "weight" not in columns:
                 db.execute("ALTER TABLE responses ADD COLUMN weight REAL NOT NULL DEFAULT 1")
@@ -1420,13 +1430,15 @@ class Handler(BaseHTTPRequestHandler):
                 interval = data.get("interval_minutes", 30)
                 if type(interval) is not int or not 15 <= interval <= 1440:
                     raise ApiError(400, "Интервал: от 15 до 1440 минут")
-                countries = data.get("countries", [])
-                if not isinstance(countries, list) or not 1 <= len(countries) <= 6 or any(
+                global_mode = data.get("global") is True
+                countries = list(COUNTRIES) if global_mode else data.get("countries", [])
+                vk_query = clean_text(data.get("vk_query", question), 240, True)
+                if not isinstance(countries, list) or not 1 <= len(countries) <= len(COUNTRIES) or any(
                         not isinstance(code, str) or code not in COUNTRIES for code in countries) or len(set(countries)) != len(countries):
-                    raise ApiError(400, "Выберите от 1 до 6 разных стран из списка")
+                    raise ApiError(400, f"Выберите от 1 до {len(COUNTRIES)} разных стран из списка")
                 cursor = db.execute("""INSERT INTO media_monitors
-                    (question, hashtag, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?)""",
-                    (question, hashtag, json.dumps(countries), interval, now()))
+                    (question, hashtag, vk_query, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (question, hashtag, vk_query, json.dumps(countries), interval, now()))
                 self.send_json(201, {"id": cursor.lastrowid})
                 return
             raise ApiError(405, "Метод не поддерживается")
@@ -1456,7 +1468,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True})
             return
         if method == "GET":
-            rows = [dict(item) for item in db.execute("""SELECT id, source, country, title, excerpt, url, published, collected_at
+            rows = [dict(item) for item in db.execute("""SELECT id, source, country, title, excerpt, url, published, collected_at,
+                item_type, author, community, engagement
                 FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000""", (monitor_id,))]
             selected = json.loads(row["countries"])
             summary = summarize_media(rows, selected or ["RU"])
