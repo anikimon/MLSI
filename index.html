@@ -434,18 +434,18 @@
     function renderMedia() {
       if (state.offline) return heading('Публичные источники','Медиаанализ','Для мониторинга требуется подключение к серверу.') + empty('Нет подключения','Подключитесь к серверу и откройте раздел снова.');
        return heading('Публичные сообщества VK','Социальный анализ','Задайте исследовательский вопрос и регион — система найдёт публичные сообщества VK, изучит посты и комментарии и подготовит аналитический отчёт.') +
-         `<section class="box"><div class="box-title"><h2>Новое исследование VK</h2></div><form id="media-form" class="form-grid"><label class="field-label">Исследовательский вопрос<input name="question" maxlength="240" required placeholder="Что сейчас обсуждают жители региона?"></label><label class="field-label">Регион работы сообществ<input name="region" maxlength="180" required placeholder="Например: Луганская Народная Республика"></label><label class="field-label">Интервал обновления, минут<input name="interval_minutes" type="number" min="15" max="1440" value="60" required></label><button class="btn" type="submit">Начать VK-анализ</button></form><p class="muted">Источник: только публичные сообщества VK, их посты и ограниченная выборка комментариев. Нужна переменная VK_ACCESS_TOKEN. ИИ отделяет факты от гипотез и прикладывает ссылки на исходные материалы.</p></section><div class="media-grid"><section class="box"><h2>Исследования</h2><div class="media-list" id="media-topics">Загружаем…</div></section><section class="box" id="media-detail">Выберите исследование.</section></div>`;
+          `<section class="box"><div class="box-title"><h2>Новое исследование VK</h2></div><form id="media-form" class="form-grid"><label class="field-label">Исследовательский вопрос<input name="question" maxlength="240" required placeholder="Что сейчас обсуждают жители региона?"></label><label class="field-label">Регион работы сообществ<input name="region" maxlength="180" required placeholder="Например: Луганская Народная Республика"></label><label class="field-label">Ссылки на группы VK <span class="muted">необязательно</span><textarea name="group_links" maxlength="4000" rows="3" placeholder="По одной ссылке на строку: https://vk.com/club123"></textarea></label><label class="field-label">Интервал обновления, минут<input name="interval_minutes" type="number" min="15" max="1440" value="60" required></label><button class="btn" type="submit">Начать VK-анализ</button></form><p class="muted">Если ссылки указаны, система проверяет именно эти публичные группы, а затем дополняет их автоматическим поиском. Нужна переменная VK_ACCESS_TOKEN. ИИ отделяет факты от гипотез и прикладывает ссылки на исходные материалы.</p></section><div class="media-grid"><section class="box"><h2>Исследования</h2><div class="media-list" id="media-topics">Загружаем…</div></section><section class="box" id="media-detail">Выберите исследование.</section></div>`;
     }
     async function loadMedia() {
       const list = document.querySelector('#media-topics');
       if (!list) return;
       document.querySelector('#media-form').onsubmit = async event => {
         event.preventDefault();
-        const button = event.currentTarget.querySelector('button'); button.disabled = true;
+        const form = event.currentTarget, button = form.querySelector('button'); button.disabled = true;
         try {
-          const values = Object.fromEntries(new FormData(event.currentTarget));
+          const values = Object.fromEntries(new FormData(form));
            const result = await api('/media','POST',{...values,region:values.region,interval_minutes:Number(values.interval_minutes),countries:['RU']});
-          mediaSelected = result.id; event.currentTarget.reset(); await loadMedia(); notify('Тема добавлена');
+          mediaSelected = result.id; form.reset(); await loadMedia(); notify('Тема добавлена');
         } catch (error) { notify(error.message,true); } finally { if (button.isConnected) button.disabled = false; }
       };
       try {

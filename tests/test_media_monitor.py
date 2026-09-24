@@ -72,6 +72,43 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(calls[0][0], "groups.search")
         self.assertEqual(calls[0][1]["q"], "Луганская Народная Республика")
 
+    def test_vk_wall_search_is_used_when_communities_have_no_posts(self):
+        def fake_api(method, params):
+            if method == "groups.search":
+                return {"items": []}
+            if method == "wall.search":
+                return {"items": [{"owner_id": -9, "id": 4, "text": "Обсуждение региона",
+                                    "date": 1, "comments": {"count": 1}, "likes": {"count": 2}}]}
+            raise AssertionError(method)
+
+        with patch("media_monitor.vk_api", side_effect=fake_api):
+            records = vk_agent("события", "ЛНР")
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["url"], "https://vk.com/wall-9_4")
+
+    def test_vk_manual_group_links_are_prioritized(self):
+        calls = []
+
+        def fake_api(method, params):
+            calls.append((method, params))
+            if method == "groups.search":
+                return {"items": []}
+            if method == "wall.get":
+                return {"items": [{"id": 3, "text": "Пост из указанной группы", "date": 1,
+                                    "comments": {"count": 0}, "likes": {"count": 0}}]}
+            if method == "wall.getComments":
+                return {"items": []}
+            raise AssertionError(method)
+
+        with patch("media_monitor.vk_api", side_effect=fake_api):
+            records = vk_agent("события", "регион", ["https://vk.com/club123"])
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(calls[0][0], "groups.search")
+        wall_call = next(call for call in calls if call[0] == "wall.get")
+        self.assertEqual(wall_call[1]["owner_id"], -123)
+
 
 if __name__ == "__main__":
     unittest.main()

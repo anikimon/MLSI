@@ -85,7 +85,7 @@ def vk_api(method, params):
     return data.get("response", {})
 
 
-def vk_agent(question, region=""):
+def vk_agent(question, region="", group_links=()):
     """Collect public VK communities, posts and a bounded sample of comments."""
     queries = []
     for query in (region, question, " ".join(part for part in (question, region) if part)):
@@ -94,6 +94,25 @@ def vk_agent(question, region=""):
             queries.append(query)
     groups = []
     seen_groups = set()
+    for link in group_links or ():
+        path = urllib.parse.urlsplit(str(link)).path.strip("/")
+        match = re.fullmatch(r"(?:club|public|group)(\d+)", path, re.I)
+        if match:
+            group_id = int(match.group(1))
+            if group_id not in seen_groups:
+                seen_groups.add(group_id)
+                groups.append({"id": group_id, "screen_name": path, "name": f"VK group {group_id}"})
+            continue
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{2,80}", path):
+            try:
+                found = vk_api("groups.getById", {"group_ids": path}).get("groups", [])
+            except (ValueError, OSError, TypeError, json.JSONDecodeError):
+                found = []
+            for group in found:
+                group_id = int(group.get("id", 0))
+                if group_id and group_id not in seen_groups:
+                    seen_groups.add(group_id)
+                    groups.append(group)
     for query in queries:
         found = vk_api("groups.search", {"q": query, "count": 12, "type": "group", "sort": 0}).get("items", [])
         for group in found:
@@ -140,6 +159,26 @@ def vk_agent(question, region=""):
                                 "community": clean_markup(group.get("name", ""))[:180], "region": region[:180],
                                 "author": f"VK user {profile_id}" if profile_id else "VK user",
                                 "engagement": int(comment.get("likes", {}).get("count", 0))})
+    if not records:
+        for query in queries[:2]:
+            try:
+                posts = vk_api("wall.search", {"q": query, "count": 100, "owners_only": 0}).get("items", [])
+            except (ValueError, OSError, TypeError, json.JSONDecodeError):
+                continue
+            for post in posts:
+                owner_id = int(post.get("owner_id", 0))
+                post_id = int(post.get("id", 0))
+                text = clean_markup(post.get("text", ""))[:900]
+                if owner_id >= 0 or not post_id or not text:
+                    continue
+                records.append({"source": "vk", "title": text[:180], "excerpt": text,
+                                "url": f"https://vk.com/wall{owner_id}_{post_id}",
+                                "published": str(post.get("date", ""))[:100], "item_type": "post",
+                                "community": "Публичная стена VK", "region": region[:180],
+                                "author": "VK community",
+                                "engagement": int(post.get("comments", {}).get("count", 0)) + int(post.get("likes", {}).get("count", 0))})
+            if records:
+                break
     return records
 
 
@@ -317,7 +356,9 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
     # Existing monitors retain their former Russian-locale search.
     region = str(monitor.get("region", "")).strip()
     if region:
-        searches = [("vk", fetch_vk, (monitor["question"], region), "vk")]
+        links = json.loads(monitor.get("vk_group_links") or "[]")
+        args = (monitor["question"], region, links) if links else (monitor["question"], region)
+        searches = [("vk", fetch_vk, args, "vk")]
     else:
         searches = [("news", fetch_news, (monitor["question"], code), code) for code in (countries or ["RU"])]
     if not region:

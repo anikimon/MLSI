@@ -203,7 +203,7 @@ def init_db(path):
             );
             CREATE TABLE IF NOT EXISTS media_monitors (
                 id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '', vk_query TEXT NOT NULL DEFAULT '',
-                region TEXT NOT NULL DEFAULT '', ai_report TEXT NOT NULL DEFAULT '',
+                region TEXT NOT NULL DEFAULT '', vk_group_links TEXT NOT NULL DEFAULT '[]', ai_report TEXT NOT NULL DEFAULT '',
                 countries TEXT NOT NULL DEFAULT '[]',
                 enabled INTEGER NOT NULL DEFAULT 1, interval_minutes INTEGER NOT NULL DEFAULT 30,
                 next_run TEXT NOT NULL, running_until TEXT, last_run TEXT, last_result TEXT NOT NULL DEFAULT '{}'
@@ -227,6 +227,8 @@ def init_db(path):
                 db.execute("ALTER TABLE media_monitors ADD COLUMN region TEXT NOT NULL DEFAULT ''")
             if "ai_report" not in monitor_columns:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN ai_report TEXT NOT NULL DEFAULT ''")
+            if "vk_group_links" not in monitor_columns:
+                db.execute("ALTER TABLE media_monitors ADD COLUMN vk_group_links TEXT NOT NULL DEFAULT '[]'")
             if "country" not in {row["name"] for row in db.execute("PRAGMA table_info(media_items)")}:
                 db.execute("ALTER TABLE media_items ADD COLUMN country TEXT NOT NULL DEFAULT ''")
                 db.execute("UPDATE media_items SET country = 'RU' WHERE source = 'news'")
@@ -1483,6 +1485,12 @@ class Handler(BaseHTTPRequestHandler):
                 data = self.read_json()
                 question = clean_text(data.get("question", ""), 240, True)
                 region = clean_text(data.get("region", ""), 180, False)
+                raw_links = data.get("group_links", "")
+                if not isinstance(raw_links, str):
+                    raise ApiError(400, "Ссылки на группы должны быть текстом")
+                group_links = [link.strip() for link in raw_links.splitlines() if link.strip()]
+                if len(group_links) > 20 or any(not re.fullmatch(r"https?://(?:www\.)?vk\.com/(?:club|public|group)?[A-Za-z0-9_.-]+/?", link, re.I) for link in group_links):
+                    raise ApiError(400, "Укажите до 20 корректных ссылок на группы VK, по одной на строку")
                 hashtag = data.get("hashtag", "")
                 if not isinstance(hashtag, str) or not re.fullmatch(r"#?[\wа-яА-ЯёЁ]{0,60}", hashtag):
                     raise ApiError(400, "Укажите один хэштег без пробелов или оставьте поле пустым")
@@ -1497,8 +1505,8 @@ class Handler(BaseHTTPRequestHandler):
                         not isinstance(code, str) or code not in COUNTRIES for code in countries) or len(set(countries)) != len(countries):
                     raise ApiError(400, f"Выберите от 1 до {len(COUNTRIES)} разных стран из списка")
                 cursor = db.execute("""INSERT INTO media_monitors
-                    (question, hashtag, vk_query, region, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (question, hashtag, vk_query, region, json.dumps(countries), interval, now()))
+                    (question, hashtag, vk_query, region, vk_group_links, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (question, hashtag, vk_query, region, json.dumps(group_links, ensure_ascii=False), json.dumps(countries), interval, now()))
                 self.send_json(201, {"id": cursor.lastrowid})
                 return
             raise ApiError(405, "Метод не поддерживается")
