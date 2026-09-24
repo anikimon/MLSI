@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 
 MAX_RESPONSE = 1024 * 1024
-AGENTS = ("СМИ · Google News RSS", "Соцсети · Mastodon", "Соцсети · Bluesky", "Соцсети · VK (нужен VK_ACCESS_TOKEN)", "Аналитик · сводка")
+AGENTS = ("VK · публичные сообщества", "VK · посты и комментарии", "Аналитик · тональность и тренды", "ИИ · подробный аналитический отчёт")
 STOP = {"это", "как", "что", "для", "или", "при", "про", "the", "and", "with", "from", "сми", "новости"}
 COUNTRIES = {
     "US": ("США", "en", "United States", "США", "United States", "USA"),
@@ -85,17 +85,18 @@ def vk_api(method, params):
     return data.get("response", {})
 
 
-def vk_agent(question):
+def vk_agent(question, region=""):
     """Collect public VK communities, posts and a bounded sample of comments."""
-    groups = vk_api("groups.search", {"q": question, "count": 8, "type": "group", "sort": 0}).get("items", [])
+    query = " ".join(part for part in (question, region) if part).strip()
+    groups = vk_api("groups.search", {"q": query, "count": 12, "type": "group", "sort": 0}).get("items", [])
     records = []
-    for group in groups[:8]:
+    for group in groups[:12]:
         group_id = int(group.get("id", 0))
         if not group_id:
             continue
         slug = group.get("screen_name") or str(group_id)
-        wall = vk_api("wall.get", {"owner_id": -group_id, "count": 12, "filter": "owner"}).get("items", [])
-        for post in wall[:12]:
+        wall = vk_api("wall.get", {"owner_id": -group_id, "count": 20, "filter": "owner"}).get("items", [])
+        for post in wall[:20]:
             post_id = int(post.get("id", 0))
             text = clean_markup(post.get("text", ""))[:900]
             if not post_id or not text:
@@ -103,7 +104,7 @@ def vk_agent(question):
             url = f"https://vk.com/{slug}?w=wall-{group_id}_{post_id}"
             records.append({"source": "vk", "title": text[:180], "excerpt": text, "url": url,
                             "published": str(post.get("date", ""))[:100], "item_type": "post",
-                            "community": clean_markup(group.get("name", ""))[:180],
+                            "community": clean_markup(group.get("name", ""))[:180], "region": region[:180],
                             "author": clean_markup(group.get("name", ""))[:180],
                             "engagement": int(post.get("comments", {}).get("count", 0)) + int(post.get("likes", {}).get("count", 0))})
             comments = vk_api("wall.getComments", {"owner_id": -group_id, "post_id": post_id, "count": 20,
@@ -116,7 +117,7 @@ def vk_agent(question):
                 records.append({"source": "vk", "title": comment_text[:180], "excerpt": comment_text,
                                 "url": url + "&reply=" + str(comment.get("id", "")),
                                 "published": str(comment.get("date", ""))[:100], "item_type": "comment",
-                                "community": clean_markup(group.get("name", ""))[:180],
+                                "community": clean_markup(group.get("name", ""))[:180], "region": region[:180],
                                 "author": f"VK user {profile_id}" if profile_id else "VK user",
                                 "engagement": int(comment.get("likes", {}).get("count", 0))})
     return records
@@ -270,11 +271,19 @@ def summarize(rows, countries=()):
         if hits:
             social_analysis.append({"name": label, "count": hits, "share": round(hits / max(1, sum(row.get("source") in ("social", "vk") for row in rows)) * 100, 1)})
     persons = Counter(row.get("author", "") for row in rows if row.get("author") and row.get("source") == "vk")
+    positive = ("хорош", "поддерж", "успех", "помог", "спас", "рад", "справил", "great", "support", "success", "help")
+    negative = ("плох", "страш", "опасн", "ненавиж", "проблем", "жалоб", "угроз", "ужас", "bad", "fear", "danger", "problem", "hate")
+    sentiment = Counter()
+    for row in rows:
+        text = (row.get("title", "") + " " + row.get("excerpt", "")).lower()
+        pos, neg = sum(text.count(word) for word in positive), sum(text.count(word) for word in negative)
+        sentiment["positive" if pos > neg else "negative" if neg > pos else "neutral"] += 1
     return {"total": len(rows), "news": counts["news"], "social": counts["social"],
             "terms": [{"word": word, "count": count} for word, count in words.most_common(10)],
             "overall": overview(rows), "countries": by_country, "narratives": narratives,
             "social_analysis": social_analysis, "vk_communities": Counter(row.get("community", "") for row in rows if row.get("community")).most_common(10),
             "vk_persons": [{"name": name, "count": count} for name, count in persons.most_common(10)],
+            "sentiment": {"positive": sentiment["positive"], "neutral": sentiment["neutral"], "negative": sentiment["negative"]},
             "unassigned_social": sum(row["source"] == "social" and not row.get("country") for row in rows),
             "calculated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
@@ -286,10 +295,15 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
     batches = {}
     countries = json.loads(monitor.get("countries") or "[]")
     # Existing monitors retain their former Russian-locale search.
-    searches = [("news", fetch_news, (monitor["question"], code), code) for code in (countries or ["RU"])]
-    searches.append(("social", fetch_social, (monitor["question"], monitor["hashtag"]), "mastodon"))
-    searches.append(("social", fetch_bluesky, (monitor["question"],), "bluesky"))
-    if monitor.get("vk_query", monitor["question"]):
+    region = str(monitor.get("region", "")).strip()
+    if region:
+        searches = [("vk", fetch_vk, (monitor["question"], region), "vk")]
+    else:
+        searches = [("news", fetch_news, (monitor["question"], code), code) for code in (countries or ["RU"])]
+    if not region:
+        searches.append(("social", fetch_social, (monitor["question"], monitor["hashtag"]), "mastodon"))
+        searches.append(("social", fetch_bluesky, (monitor["question"],), "bluesky"))
+    if not region and monitor.get("vk_query", monitor["question"]):
         searches.append(("vk", fetch_vk, (monitor.get("vk_query") or monitor["question"],), "vk"))
     for name, agent, args, code in searches:
         label = f"news:{code}" if countries and name == "news" else (code if name == "social" else name)
@@ -326,5 +340,6 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
             results[label] = "Ошибка источника: " + str(exc)[:140]
     if countries:
         results["news"] = "; ".join(f"{COUNTRIES[code][0]}: {results.get('news:' + code, 'нет данных')}" for code in countries)
-    results["social"] = "; ".join(f"{source}: {results.get(source, 'нет данных')}" for source in ("mastodon", "bluesky", "vk"))
+    results["social"] = (f"vk: {results.get('vk', 'нет данных')}" if region else
+                         "; ".join(f"{source}: {results.get(source, 'нет данных')}" for source in ("mastodon", "bluesky", "vk")))
     return new_count, results

@@ -203,6 +203,7 @@ def init_db(path):
             );
             CREATE TABLE IF NOT EXISTS media_monitors (
                 id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '', vk_query TEXT NOT NULL DEFAULT '',
+                region TEXT NOT NULL DEFAULT '', ai_report TEXT NOT NULL DEFAULT '',
                 countries TEXT NOT NULL DEFAULT '[]',
                 enabled INTEGER NOT NULL DEFAULT 1, interval_minutes INTEGER NOT NULL DEFAULT 30,
                 next_run TEXT NOT NULL, running_until TEXT, last_run TEXT, last_result TEXT NOT NULL DEFAULT '{}'
@@ -222,6 +223,10 @@ def init_db(path):
             monitor_columns = {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}
             if "vk_query" not in monitor_columns:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN vk_query TEXT NOT NULL DEFAULT ''")
+            if "region" not in monitor_columns:
+                db.execute("ALTER TABLE media_monitors ADD COLUMN region TEXT NOT NULL DEFAULT ''")
+            if "ai_report" not in monitor_columns:
+                db.execute("ALTER TABLE media_monitors ADD COLUMN ai_report TEXT NOT NULL DEFAULT ''")
             if "country" not in {row["name"] for row in db.execute("PRAGMA table_info(media_items)")}:
                 db.execute("ALTER TABLE media_items ADD COLUMN country TEXT NOT NULL DEFAULT ''")
                 db.execute("UPDATE media_items SET country = 'RU' WHERE source = 'news'")
@@ -299,6 +304,19 @@ def clean_text(value, max_len, required=False):
     return value
 
 
+def media_ai_report(question, region, summary, rows):
+    """Turn bounded VK observations into a sourced analyst report."""
+    key = deepseek_key()
+    evidence = [{"type": row.get("item_type", "publication"), "community": row.get("community", ""),
+                 "text": (row.get("title", "") + " " + row.get("excerpt", ""))[:1100],
+                 "engagement": row.get("engagement", 0), "url": row.get("url", "")}
+                for row in rows[:120]]
+    payload = {"model": "deepseek-chat", "temperature": 0.1, "max_tokens": 5000,
+               "messages": [{"role": "system", "content": "Ты аналитик публичных сообществ VK. Пиши подробный отчёт на русском. Отделяй наблюдения от гипотез, не выдавай тональность сообщества за мнение всего региона, не раскрывай личности пользователей по ID. Каждое существенное утверждение подтверждай ссылкой из evidence. Не придумывай факты, персоны или события."},
+                            {"role": "user", "content": json.dumps({"question": question, "region": region, "summary": summary, "evidence": evidence}, ensure_ascii=False)}]}
+    return deepseek_answer(payload, key, timeout=120, max_bytes=131072)
+
+
 def calendar_date(value):
     if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise ApiError(400, "Укажите дату в формате ГГГГ-ММ-ДД")
@@ -365,10 +383,18 @@ def run_media_monitor(path, monitor_id, force=False):
                 db.execute("""DELETE FROM media_items WHERE monitor_id = ? AND id NOT IN
                     (SELECT id FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000)""",
                            (monitor_id, monitor_id))
-                summary = summarize_media(db.execute("SELECT id, source, country, title, excerpt, url FROM media_items WHERE monitor_id = ?",
-                                                     (monitor_id,)).fetchall(), json.loads(monitor["countries"]) or ["RU"])
+                rows = [dict(item) for item in db.execute("""SELECT id, source, country, title, excerpt, url, published,
+                    item_type, author, community, engagement FROM media_items WHERE monitor_id = ? ORDER BY id DESC""", (monitor_id,))]
+                summary = summarize_media(rows, json.loads(monitor["countries"]) or ["RU"])
                 results["added"] = added
                 results["summary"] = summary
+                if monitor.get("region"):
+                    try:
+                        report = media_ai_report(monitor["question"], monitor["region"], summary, rows)
+                        db.execute("UPDATE media_monitors SET ai_report = ? WHERE id = ?", (report, monitor_id))
+                        results["ai_report"] = "Сформирован"
+                    except (ApiError, OSError, ValueError, TypeError) as exc:
+                        results["ai_report"] = "Не сформирован: " + str(exc)[:180]
                 db.execute("""UPDATE media_monitors SET running_until = NULL, last_run = ?, next_run = ?, last_result = ?
                     WHERE id = ?""", (now(), (datetime.now(timezone.utc) + timedelta(minutes=monitor["interval_minutes"])).isoformat(timespec="seconds"),
                                       json.dumps(results, ensure_ascii=False), monitor_id))
@@ -1423,6 +1449,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST":
                 data = self.read_json()
                 question = clean_text(data.get("question", ""), 240, True)
+                region = clean_text(data.get("region", ""), 180, False)
                 hashtag = data.get("hashtag", "")
                 if not isinstance(hashtag, str) or not re.fullmatch(r"#?[\wа-яА-ЯёЁ]{0,60}", hashtag):
                     raise ApiError(400, "Укажите один хэштег без пробелов или оставьте поле пустым")
@@ -1437,8 +1464,8 @@ class Handler(BaseHTTPRequestHandler):
                         not isinstance(code, str) or code not in COUNTRIES for code in countries) or len(set(countries)) != len(countries):
                     raise ApiError(400, f"Выберите от 1 до {len(COUNTRIES)} разных стран из списка")
                 cursor = db.execute("""INSERT INTO media_monitors
-                    (question, hashtag, vk_query, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?, ?)""",
-                    (question, hashtag, vk_query, json.dumps(countries), interval, now()))
+                    (question, hashtag, vk_query, region, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (question, hashtag, vk_query, region, json.dumps(countries), interval, now()))
                 self.send_json(201, {"id": cursor.lastrowid})
                 return
             raise ApiError(405, "Метод не поддерживается")
