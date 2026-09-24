@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
-from media_monitor import AGENTS, collect as collect_media, summarize as summarize_media
+from media_monitor import AGENTS, COUNTRIES, collect as collect_media, summarize as summarize_media
 from reports import analytical_pdf_bytes, analytical_snapshot, build_member_quotas, build_quotas, build_report, parse_weight, pdf_bytes, read_excel
 from presentations import deck_from_outline, extract_template_style, pptx_bytes, validate_colors, validate_deck
 
@@ -203,17 +203,23 @@ def init_db(path):
             );
             CREATE TABLE IF NOT EXISTS media_monitors (
                 id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '',
+                countries TEXT NOT NULL DEFAULT '[]',
                 enabled INTEGER NOT NULL DEFAULT 1, interval_minutes INTEGER NOT NULL DEFAULT 30,
                 next_run TEXT NOT NULL, running_until TEXT, last_run TEXT, last_result TEXT NOT NULL DEFAULT '{}'
             );
             CREATE TABLE IF NOT EXISTS media_items (
                 id INTEGER PRIMARY KEY, monitor_id INTEGER NOT NULL REFERENCES media_monitors(id) ON DELETE CASCADE,
-                source TEXT NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL, url TEXT NOT NULL,
+                source TEXT NOT NULL, country TEXT NOT NULL DEFAULT '', title TEXT NOT NULL, excerpt TEXT NOT NULL, url TEXT NOT NULL,
                 published TEXT NOT NULL, collected_at TEXT NOT NULL,
                 UNIQUE(monitor_id, url)
             );
             CREATE INDEX IF NOT EXISTS media_items_recent ON media_items(monitor_id, id DESC);
             """)
+            if "countries" not in {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}:
+                db.execute("ALTER TABLE media_monitors ADD COLUMN countries TEXT NOT NULL DEFAULT '[]'")
+            if "country" not in {row["name"] for row in db.execute("PRAGMA table_info(media_items)")}:
+                db.execute("ALTER TABLE media_items ADD COLUMN country TEXT NOT NULL DEFAULT ''")
+                db.execute("UPDATE media_items SET country = 'RU' WHERE source = 'news'")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(responses)")}
             if "weight" not in columns:
                 db.execute("ALTER TABLE responses ADD COLUMN weight REAL NOT NULL DEFAULT 1")
@@ -349,8 +355,8 @@ def run_media_monitor(path, monitor_id, force=False):
                 db.execute("""DELETE FROM media_items WHERE monitor_id = ? AND id NOT IN
                     (SELECT id FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000)""",
                            (monitor_id, monitor_id))
-                summary = summarize_media(db.execute("SELECT source, title FROM media_items WHERE monitor_id = ?",
-                                                     (monitor_id,)).fetchall())
+                summary = summarize_media(db.execute("SELECT id, source, country, title, excerpt, url FROM media_items WHERE monitor_id = ?",
+                                                     (monitor_id,)).fetchall(), json.loads(monitor["countries"]) or ["RU"])
                 results["added"] = added
                 results["summary"] = summary
                 db.execute("""UPDATE media_monitors SET running_until = NULL, last_run = ?, next_run = ?, last_result = ?
@@ -1399,7 +1405,10 @@ class Handler(BaseHTTPRequestHandler):
                 monitors = [dict(row) for row in db.execute("SELECT * FROM media_monitors ORDER BY id DESC")]
                 for monitor in monitors:
                     monitor["last_result"] = json.loads(monitor["last_result"])
-                self.send_json(200, {"monitors": monitors, "agents": AGENTS})
+                for monitor in monitors:
+                    monitor["countries"] = json.loads(monitor["countries"])
+                self.send_json(200, {"monitors": monitors, "agents": AGENTS,
+                                     "available_countries": [{"code": code, "name": info[0]} for code, info in COUNTRIES.items()]})
                 return
             if method == "POST":
                 data = self.read_json()
@@ -1411,9 +1420,13 @@ class Handler(BaseHTTPRequestHandler):
                 interval = data.get("interval_minutes", 30)
                 if type(interval) is not int or not 15 <= interval <= 1440:
                     raise ApiError(400, "Интервал: от 15 до 1440 минут")
+                countries = data.get("countries", [])
+                if not isinstance(countries, list) or not 1 <= len(countries) <= 6 or any(
+                        not isinstance(code, str) or code not in COUNTRIES for code in countries) or len(set(countries)) != len(countries):
+                    raise ApiError(400, "Выберите от 1 до 6 разных стран из списка")
                 cursor = db.execute("""INSERT INTO media_monitors
-                    (question, hashtag, interval_minutes, next_run) VALUES (?, ?, ?, ?)""",
-                    (question, hashtag, interval, now()))
+                    (question, hashtag, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?)""",
+                    (question, hashtag, json.dumps(countries), interval, now()))
                 self.send_json(201, {"id": cursor.lastrowid})
                 return
             raise ApiError(405, "Метод не поддерживается")
@@ -1443,11 +1456,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True})
             return
         if method == "GET":
-            rows = [dict(item) for item in db.execute("""SELECT source, title, excerpt, url, published, collected_at
+            rows = [dict(item) for item in db.execute("""SELECT id, source, country, title, excerpt, url, published, collected_at
                 FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000""", (monitor_id,))]
-            summary = summarize_media(rows)
+            selected = json.loads(row["countries"])
+            summary = summarize_media(rows, selected or ["RU"])
             if action is None or action == "export.json":
-                result = {"monitor": {**dict(row), "last_result": json.loads(row["last_result"])},
+                result = {"monitor": {**dict(row), "countries": selected, "last_result": json.loads(row["last_result"])},
                           "summary": summary, "items": rows, "agents": AGENTS}
                 if action is None:
                     self.send_json(200, result)
@@ -1458,17 +1472,25 @@ class Handler(BaseHTTPRequestHandler):
             if action == "export.csv":
                 output = io.StringIO(newline="")
                 writer = csv.writer(output, lineterminator="\r\n")
-                writer.writerow(["Источник", "Заголовок", "Фрагмент", "Ссылка", "Дата публикации", "Дата сбора"])
+                writer.writerow(["Источник", "Страна поиска", "Заголовок", "Фрагмент", "Ссылка", "Дата публикации", "Дата сбора"])
                 for item in rows:
-                    writer.writerow([csv_safe(item[key]) for key in ("source", "title", "excerpt", "url", "published", "collected_at")])
+                    writer.writerow([csv_safe(item[key]) for key in ("source", "country", "title", "excerpt", "url", "published", "collected_at")])
                 self.send_bytes(200, b"\xef\xbb\xbf" + output.getvalue().encode("utf-8"), "text/csv; charset=utf-8",
                                 {"Content-Disposition": f"attachment; filename=media-{monitor_id}.csv"})
                 return
             if action == "export.md":
                 lines = [f"# Медиаанализ: {row['question']}", "", f"Материалов: {summary['total']}; СМИ: {summary['news']}; соцсети: {summary['social']}.",
-                         "", "Частые слова в заголовках: " + ", ".join(f"{term['word']} ({term['count']})" for term in summary["terms"]), ""]
+                         "", "Частые слова в заголовках: " + ", ".join(f"{term['word']} ({term['count']})" for term in summary["terms"]),
+                         "", "Общая сводка: " + summary["overall"]["description"],
+                         "Чаще в последних материалах: " + ", ".join(t["word"] for t in summary["overall"]["trending_terms"]), ""]
+                for country in summary["countries"]:
+                    lines.extend([f"### {country['name']}", country["description"],
+                                  "Упоминания конфликтов: " + ", ".join(f"{item['kind']}: " +
+                                      (f"{item['direction']['actor_mentioned']} → {item['direction']['target_mentioned']}" if item["direction"] else
+                                       f"упомянуты {', '.join(item['targets_mentioned'])}; направление не определено") +
+                                      f" ({item['url']})" for item in country["conflict_mentions"]), ""])
                 for item in rows:
-                    lines.extend([f"## {item['source']}: {item['title'].replace(chr(10), ' ')}", item["published"],
+                    lines.extend([f"## {item['source']} [{item['country']}]: {item['title'].replace(chr(10), ' ')}", item["published"],
                                   item["excerpt"], item["url"], ""])
                 self.send_bytes(200, "\n".join(lines).encode("utf-8"), "text/markdown; charset=utf-8",
                                 {"Content-Disposition": f"attachment; filename=media-{monitor_id}.md"})
