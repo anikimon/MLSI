@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Камень, ножницы, бумага</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1e3c72, #2a5298);
+    color: #fff;
+    padding: 20px;
+  }
+  .game {
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 20px;
+    padding: 30px;
+    max-width: 520px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 20px; }
+  .score {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-bottom: 25px;
+    font-size: 1.05rem;
+  }
+  .score span { display: block; font-size: 2rem; font-weight: bold; }
+  .result {
+    font-size: 1.25rem;
+    min-height: 34px;
+    margin-bottom: 20px;
+    font-weight: 600;
+  }
+  .moves {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 25px;
+    font-size: 2.4rem;
+  }
+  .moves div {
+    width: 70px;
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 15px;
+  }
+  button.choice {
+    font-size: 2.4rem;
+    width: 90px;
+    height: 90px;
+    border: none;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+    transition: transform 0.15s, background 0.15s;
+    margin: 0 8px;
+  }
+  button.choice:hover { background: rgba(255, 255, 255, 0.3); transform: translateY(-4px); }
+  button.choice:active { transform: translateY(0); }
+  button.choice:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .reset {
+    margin-top: 20px;
+    padding: 10px 24px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 10px;
+    background: #ff5c5c;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .reset:hover { background: #e14b4b; }
+  .win { color: #7dffa0; }
+  .lose { color: #ff8080; }
+  .draw { color: #ffe066; }
+</style>
+</head>
+<body>
+  <div class="game">
+    <h1>Камень, ножницы, бумага</h1>
+
+    <div class="score">
+      <div>Ты <span id="playerScore">0</span></div>
+      <div>Компьютер <span id="computerScore">0</span></div>
+    </div>
+
+    <div class="result" id="result">Сделай свой выбор!</div>
+
+    <div class="moves">
+      <div id="playerMove">❔</div>
+      <div>🆚</div>
+      <div id="computerMove">❔</div>
+    </div>
+
+    <div class="controls">
+      <button class="choice" data-move="rock" title="Камень">✊</button>
+      <button class="choice" data-move="scissors" title="Ножницы">✌️</button>
+      <button class="choice" data-move="paper" title="Бумага">✋</button>
+    </div>
+
+    <button class="reset" id="reset">Сбросить счёт</button>
+  </div>
+
+<script>
+  const EMOJI = { rock: "✊", scissors: "✌️", paper: "✋" };
+  const NAMES = { rock: "Камень", scissors: "Ножницы", paper: "Бумага" };
+  const BEATS = { rock: "scissors", scissors: "paper", paper: "rock" };
+
+  let playerScore = 0;
+  let computerScore = 0;
+  let locked = false;
+
+  const playerScoreEl = document.getElementById("playerScore");
+  const computerScoreEl = document.getElementById("computerScore");
+  const resultEl = document.getElementById("result");
+  const playerMoveEl = document.getElementById("playerMove");
+  const computerMoveEl = document.getElementById("computerMove");
+  const buttons = document.querySelectorAll(".choice");
+
+  function randomMove() {
+    const moves = Object.keys(EMOJI);
+    return moves[Math.floor(Math.random() * moves.length)];
+  }
+
+  function play(playerMove) {
+    if (locked) return;
+    locked = true;
+    buttons.forEach((b) => (b.disabled = true));
+
+    const computerMove = randomMove();
+    playerMoveEl.textContent = EMOJI[playerMove];
+
+    let count = 0;
+    const interval = setInterval(() => {
+      computerMoveEl.textContent = EMOJI[randomMove()];
+      if (++count > 8) {
+        clearInterval(interval);
+        finish(playerMove, computerMove);
+      }
+    }, 70);
+  }
+
+  function finish(playerMove, computerMove) {
+    computerMoveEl.textContent = EMOJI[computerMove];
+
+    resultEl.className = "result";
+    if (playerMove === computerMove) {
+      resultEl.textContent = "Ничья!";
+      resultEl.classList.add("draw");
+    } else if (BEATS[playerMove] === computerMove) {
+      playerScore++;
+      resultEl.textContent = "Ты победил!";
+      resultEl.classList.add("win");
+    } else {
+      computerScore++;
+      resultEl.textContent = "Победил компьютер!";
+      resultEl.classList.add("lose");
+    }
+
+    playerScoreEl.textContent = playerScore;
+    computerScoreEl.textContent = computerScore;
+
+    locked = false;
+    buttons.forEach((b) => (b.disabled = false));
+  }
+
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => play(btn.dataset.move));
+  });
+
+  document.getElementById("reset").addEventListener("click", () => {
+    playerScore = 0;
+    computerScore = 0;
+    playerScoreEl.textContent = "0";
+    computerScoreEl.textContent = "0";
+    resultEl.className = "result";
+    resultEl.textContent = "Сделай свой выбор!";
+    playerMoveEl.textContent = "❔";
+    computerMoveEl.textContent = "❔";
+  });
+</script>
+</body>
+</html>
