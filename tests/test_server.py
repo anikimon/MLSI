@@ -749,7 +749,9 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(self.request(self.interviewer, path, "POST", {"slide_count": 3})[0], 403)
         self.assertEqual(self.request(self.admin, path + ".pptx", binary=True)[0], 404)
         colors = {"background": "#ffffff", "text": "#193a54", "accent": "#14527c"}
-        request = {"slide_count": 3, "prompt": "Сосредоточься на ограничениях", "colors": colors}
+        request = {"slide_count": 3, "prompt": "Сосредоточься на ограничениях", "colors": colors,
+                   "audience": "Руководители", "tone": "официальный", "visual_style": "редакционный",
+                   "density": "сбалансированная", "format": "briefing", "palette": "editorial"}
         self.assertEqual(self.request(self.admin, path, "POST", request)[0], 409)
         self.request(self.admin, f"/studies/{sid}/questionnaire", "POST", {"questions": [
             {"type": "text", "label": "Комментарий"}]})
@@ -759,11 +761,17 @@ class PlannerTest(unittest.TestCase):
             self.assertEqual(self.request(self.admin, f"/studies/{sid}/analytical-report", "POST", {})[0], 200)
         outline = json.dumps({"slides": [{"title": f"Слайд {i}", "bullets": ["Развернутый вывод по отчёту с объяснением результатов."],
                                           "summary": "Основной вывод по выборке"} for i in range(1, 4)]})
-        with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", return_value=outline) as ai:
+        brief = json.dumps({"creative_direction": "Строгая редакционная подача", "story_arc": ["Контекст", "Вывод"],
+                            "visual_principles": ["Контраст фактов и выводов"], "key_message": "Данные требуют проверки",
+                            "avoid": ["Перегрузка текстом"]})
+        with patch("server.deepseek_key", return_value="placeholder"), patch("server.deepseek_answer", side_effect=[brief, outline]) as ai:
             status, response = self.request(self.admin, path, "POST", request)
             self.assertEqual(status, 200)
-            sent = json.loads(ai.call_args.args[0]["messages"][1]["content"])
+            self.assertEqual(ai.call_count, 2)
+            sent = json.loads(ai.call_args_list[1].args[0]["messages"][1]["content"])
             self.assertEqual(sent["wishes"], request["prompt"])
+            self.assertEqual(sent["settings"]["audience"], "Руководители")
+            self.assertEqual(sent["brief"]["key_message"], "Данные требуют проверки")
             self.assertNotIn("личный ответ", json.dumps(sent, ensure_ascii=False))
         deck = response["presentation"]
         self.assertEqual(len(deck["slides"]), 3)

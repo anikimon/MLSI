@@ -1069,9 +1069,17 @@
       } catch (error) { notify(error.message,true); }
       finally { input.disabled = false; input.value = ''; }
     }
+    function enhancePresentationForm() {
+      const prompt = document.querySelector('#presentation-prompt'), form = prompt?.closest('form');
+      if (!form || form.querySelector('#presentation-audience')) return;
+      form.insertAdjacentHTML('beforeend', `<div class="presentation-fields"><label class="field-label">Аудитория<input id="presentation-audience" maxlength="180" value="Руководители и специалисты"></label><label class="field-label">Тон<select id="presentation-tone"><option value="аналитичный">Аналитичный</option><option value="энергичный">Энергичный</option><option value="официальный">Официальный</option><option value="вдохновляющий">Вдохновляющий</option></select></label><label class="field-label">Визуальный стиль<select id="presentation-visual-style"><option value="редакционный">Редакционный</option><option value="молодёжный">Молодёжный</option><option value="деловой">Деловой</option><option value="минималистичный">Минималистичный</option><option value="журнальный">Журнальный</option></select></label><label class="field-label">Плотность<select id="presentation-density"><option value="воздушная">Воздушная</option><option value="сбалансированная" selected>Сбалансированная</option><option value="насыщенная">Насыщенная</option></select></label><label class="field-label">Формат<select id="presentation-format"><option value="story">История и главный вывод</option><option value="briefing">Брифинг для руководства</option><option value="lecture">Публичная лекция</option><option value="report">Подробный отчёт</option></select></label><label class="field-label">Цветовая схема<select id="presentation-palette"><option value="knowledge">Знание · коралл и графит</option><option value="youth">Молодёжная · розовый и кремовый</option><option value="civic">Городская · бирюза и светлый фон</option><option value="midnight">Ночная · мята и тёмный фон</option><option value="editorial">Редакционная · кобальт и белый</option><option value="energy">Энергия · оранжевый</option><option value="forest">Лесная · зелёная</option><option value="violet">Фиолетовая · лавандовая</option></select></label></div><p class="muted">ИИ сначала превращает пожелания в креативный бриф, затем отдельно строит драматургию и содержание слайдов. Цвета и образец PPTX остаются под вашим контролем.</p>`);
+      const palettes = {knowledge:['#f4f1ea','#17202a','#e85d35'],youth:['#fff6e8','#231942','#f72585'],civic:['#eef6f7','#12343b','#008c95'],midnight:['#0b1220','#e8eef7','#55d6be'],editorial:['#f7f7f5','#202124','#3157d5'],energy:['#fff3e8','#291711','#ff5a36'],forest:['#eff7f0','#16352b','#2e8b57'],violet:['#f5f0ff','#24153f','#7654d6']};
+      form.querySelector('#presentation-palette').onchange = event => { const palette = palettes[event.target.value]; if (!palette) return; ['background','text','accent'].forEach((key,index) => { const input = document.querySelector(`#presentation-${key}`); if (input) input.value = palette[index]; }); };
+    }
     async function loadPresentation(studyId) {
       const container = document.querySelector('#presentation-content');
       if (!container) return;
+      enhancePresentationForm();
       try {
         const result = await api(`/studies/${studyId}/presentation`);
         if (!container.isConnected || state.selected !== studyId) return;
@@ -1092,7 +1100,13 @@
         await api(`/studies/${studyId}/presentation`,'POST',{
           prompt:form.querySelector('#presentation-prompt').value,
           slide_count:Number(form.querySelector('#presentation-count').value),
-          colors:Object.fromEntries(['background','text','accent'].map(key => [key,form.querySelector(`#presentation-${key}`).value]))
+          colors:Object.fromEntries(['background','text','accent'].map(key => [key,form.querySelector(`#presentation-${key}`).value])),
+          audience:form.querySelector('#presentation-audience')?.value || 'Руководители и специалисты',
+          tone:form.querySelector('#presentation-tone')?.value || 'аналитичный',
+          visual_style:form.querySelector('#presentation-visual-style')?.value || 'редакционный',
+          density:form.querySelector('#presentation-density')?.value || 'сбалансированная',
+          format:form.querySelector('#presentation-format')?.value || 'story',
+          palette:form.querySelector('#presentation-palette')?.value || 'knowledge'
         });
         await loadPresentation(studyId); notify('Презентация сохранена');
       } catch (error) { notify(error.message,true); }

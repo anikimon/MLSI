@@ -16,6 +16,16 @@ from pptx.util import Inches, Pt
 
 DEFAULT_TITLE = {"font": "Aptos", "size": 28, "bold": True, "color": "#14527c"}
 DEFAULT_BODY = {"font": "Aptos", "size": 17, "bold": False, "color": "#193a54"}
+PRESENTATION_PALETTES = {
+    "knowledge": {"background": "#f4f1ea", "text": "#17202a", "accent": "#e85d35"},
+    "youth": {"background": "#fff6e8", "text": "#231942", "accent": "#f72585"},
+    "civic": {"background": "#eef6f7", "text": "#12343b", "accent": "#008c95"},
+    "midnight": {"background": "#0b1220", "text": "#e8eef7", "accent": "#55d6be"},
+    "editorial": {"background": "#f7f7f5", "text": "#202124", "accent": "#3157d5"},
+    "energy": {"background": "#fff3e8", "text": "#291711", "accent": "#ff5a36"},
+    "forest": {"background": "#eff7f0", "text": "#16352b", "accent": "#2e8b57"},
+    "violet": {"background": "#f5f0ff", "text": "#24153f", "accent": "#7654d6"},
+}
 DEFAULT_LAYOUT = {"title": {"x": 6, "y": 8, "w": 88, "h": 20},
                   "body": {"x": 8, "y": 33, "w": 84, "h": 57}}
 MODERN_LAYOUT = {"cover": {"title": {"x": 9, "y": 23, "w": 77, "h": 25},
