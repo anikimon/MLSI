@@ -173,6 +173,8 @@
     .slide-decoration.cover-orb { left:70%; top:-18%; width:50%; height:89%; border-radius:50%; }
     .slide-decoration.cover-orb-inner { left:80%; top:3%; width:30%; height:54%; border-radius:50%; }
     .slide-decoration.dot { left:91%; top:8%; width:3%; aspect-ratio:1; border-radius:50%; }
+    .slide-decoration.split-panel { left:52%; top:35%; width:40%; height:54%; border-radius:18px; }
+    .slide-decoration.spotlight-panel { left:8%; top:34%; width:84%; height:29%; border-radius:18px; }
     .slide-decoration.pill { left:8%; top:4%; width:46%; height:8%; border-radius:100px; }
     .slide-decoration.callout-card { left:9%; top:76%; width:82%; height:13%; border-radius:12px; }
     .slide-decoration.rule { left:9%; top:92%; width:82%; height:.25%; }
@@ -1094,7 +1096,7 @@
       const container = document.querySelector('#presentation-content');
       if (!container) return;
       if (!presentationDeck) { container.innerHTML = '<p class="muted">Презентация ещё не создана.</p>'; return; }
-      container.innerHTML = `${stale ? '<p style="color:#a34a25">Данные или записка изменились после генерации презентации. Обновите материалы перед передачей.</p>' : ''}<div class="slide-tools"><label for="slide-select">Слайд</label><select id="slide-select">${presentationDeck.slides.map((_,i) => `<option value="${i}">${i+1} / ${presentationDeck.slides.length}</option>`).join('')}</select><button type="button" class="btn small" id="slide-save">Сохранить правки</button><a class="btn small secondary" href="/api/studies/${studyId}/presentation.pptx">Скачать PPTX ↓</a></div><div id="slide-stage" class="slide-stage"></div><div id="slide-editor"></div><p class="muted">Выберите блок для редактирования текста; потяните блок на слайде для перемещения. Изменения сохраняются кнопкой выше.</p>`;
+      container.innerHTML = `${stale ? '<p style="color:#a34a25">Данные или записка изменились после генерации презентации. Обновите материалы перед передачей.</p>' : ''}<div class="slide-tools"><label for="slide-select">Слайд</label><select id="slide-select">${presentationDeck.slides.map((_,i) => `<option value="${i}">${i+1} / ${presentationDeck.slides.length}</option>`).join('')}</select><label for="slide-theme">Стиль</label><select id="slide-theme"><option value="">Палитра презентации</option><option value="ocean">Глубокий синий</option><option value="coral">Тёплый коралл</option><option value="forest">Лесной</option></select><button type="button" class="btn small" id="slide-save">Сохранить правки</button><a class="btn small secondary" href="/api/studies/${studyId}/presentation.pptx">Скачать PPTX ↓</a></div><div id="slide-stage" class="slide-stage"></div><div id="slide-editor"></div><p class="muted">Выберите блок для редактирования текста; потяните блок на слайде для перемещения. Меняйте компоновку и цветовую тему, затем сохраните правки перед скачиванием.</p>`;
       const select = container.querySelector('#slide-select'), stage = container.querySelector('#slide-stage'), editor = container.querySelector('#slide-editor');
       let selected = 0;
       const show = () => {
@@ -1111,12 +1113,14 @@
           if (design.variant === 'cover') {
             decoration('cover-orb',design.panel); decoration('cover-orb-inner',design.soft);
             decoration('cover-stripe',design.accent);
-          } else {
-            decoration('card',design.panel); decoration('stripe',design.accent);
-            decoration('dot',design.soft);
-          }
-          decoration('pill',design.soft);
-          if (elements.some(element => element.kind === 'callout')) decoration('callout-card',design.soft);
+           } else {
+             decoration('card',design.panel); decoration('stripe',design.accent);
+             if (design.layout === 'split') decoration('split-panel',design.soft);
+             else if (design.layout === 'spotlight') decoration('spotlight-panel',design.soft);
+             else decoration('dot',design.soft);
+           }
+           decoration('pill',design.soft);
+           if ((!design.layout || design.layout === 'classic') && elements.some(element => element.kind === 'callout')) decoration('callout-card',design.soft);
           decoration('rule',design.soft);
           const page = document.createElement('span'); page.className = 'slide-page';
           page.textContent = `${String(Number(select.value)+1).padStart(2,'0')} / ${String(presentationDeck.slides.length).padStart(2,'0')}`;
@@ -1127,7 +1131,7 @@
           node.className = `slide-element ${element.kind}${i === selected ? ' selected' : ''}`;
           node.dataset.elementIndex = i;
           node.textContent = element.text;
-          Object.assign(node.style,{left:`${element.x}%`,top:`${element.y}%`,width:`${element.w}%`,height:`${element.h}%`,color:element.style?.color || (element.kind === 'title' ? colors.accent : colors.text),fontFamily:element.style?.font || 'Aptos',fontWeight:element.style ? (element.style.bold ? '700' : '400') : '',fontSize:element.style ? `${Math.max(9,element.style.size * stage.clientHeight / 540)}px` : ''});
+           Object.assign(node.style,{left:`${element.x}%`,top:`${element.y}%`,width:`${element.w}%`,height:`${element.h}%`,color:element.style?.color || (element.kind === 'title' ? colors.accent : colors.text),fontFamily:element.style?.font || 'Aptos',fontWeight:element.style ? (element.style.bold ? '700' : '400') : '',fontSize:element.style ? `${Math.max(9,element.style.size * stage.clientHeight / 540 * 4/3)}px` : ''});
           node.onpointerdown = event => {
             if (event.button !== 0) return;
             selected = i; showEditor();
@@ -1148,7 +1152,19 @@
       };
       const showEditor = () => {
         const slide = presentationDeck.slides[Number(select.value)], element = slide.elements[selected];
-        editor.innerHTML = `<label class="field-label" for="slide-text">${({title:'Заголовок',body:'Текст',tag:'Ярлычок',callout:'Главный вывод'})[element.kind]} — объект ${selected+1}</label><textarea id="slide-text" maxlength="1200"></textarea><div class="presentation-fields"><label class="field-label">Размер текста<input id="slide-font-size" type="number" min="8" max="64" step=".5" value="${element.style?.size || (element.kind === 'title' ? 28 : 17)}"></label><label class="field-label">Цвет текста<input id="slide-font-color" type="color" value="${element.style?.color || (element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text)}"></label><label class="field-label">Фон слайда<input id="slide-background" type="color" value="${slide.background || presentationDeck.colors.background}"></label></div>`;
+         editor.innerHTML = `<label class="field-label" for="slide-text">${({title:'Заголовок',body:'Текст',tag:'Ярлычок',callout:'Главный вывод'})[element.kind]} — объект ${selected+1}</label><textarea id="slide-text" maxlength="1200"></textarea><div class="presentation-fields"><label class="field-label">Размер текста<input id="slide-font-size" type="number" min="8" max="64" step=".5" value="${element.style?.size || (element.kind === 'title' ? 28 : 17)}"></label><label class="field-label">Цвет текста<input id="slide-font-color" type="color" value="${element.style?.color || (element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text)}"></label><label class="field-label">Фон слайда<input id="slide-background" type="color" value="${slide.background || presentationDeck.colors.background}"></label></div>${slide.design && slide.design.variant === 'content' ? `<label class="field-label">Компоновка слайда<select id="slide-layout"><option value="classic">Классическая карточка</option><option value="split" ${!slide.elements.some(e => e.kind === 'callout') ? 'disabled' : ''}>Две колонки</option><option value="spotlight" ${!slide.elements.some(e => e.kind === 'callout') ? 'disabled' : ''}>Крупный вывод</option></select></label>` : ''}`;
+         if (editor.querySelector('#slide-layout')) {
+           editor.querySelector('#slide-layout').value = slide.design.layout || 'classic';
+           editor.querySelector('#slide-layout').onchange = event => {
+             const layout = event.target.value;
+             if (layout !== 'classic' && (slide.elements.find(e => e.kind === 'body')?.text.length || 0) > 360) { notify('Для этой компоновки сократите основной текст до 360 символов',true); event.target.value = slide.design.layout || 'classic'; return; }
+             slide.design.layout = layout;
+             const body = slide.elements.find(e => e.kind === 'body'), callout = slide.elements.find(e => e.kind === 'callout');
+             if (body) Object.assign(body,layout === 'split' ? {x:11,y:40,w:37,h:42} : layout === 'spotlight' ? {x:11,y:66,w:77,h:20} : {x:10,y:38,w:79,h:35});
+             if (callout) Object.assign(callout,layout === 'split' ? {x:55,y:43,w:32,h:37} : layout === 'spotlight' ? {x:11,y:38,w:76,h:23} : {x:10,y:77,w:79,h:11});
+             show();
+           };
+         }
         const input = editor.querySelector('textarea'); input.value = element.text;
         input.oninput = () => { element.text = input.value; stage.querySelector(`[data-element-index="${selected}"]`).textContent = input.value; };
         const style = () => element.style ||= {font:'Aptos',size:element.kind === 'title' ? 28 : 17,bold:element.kind === 'title',color:element.kind === 'title' ? presentationDeck.colors.accent : presentationDeck.colors.text};
@@ -1170,7 +1186,21 @@
           show();
         };
       };
-      select.onchange = () => { selected = 0; show(); };
+       select.onchange = () => { selected = 0; show(); };
+       container.querySelector('#slide-theme').onchange = event => {
+         const themes = {ocean:{background:'#f2f7fc',text:'#17324d',accent:'#147ca5'},coral:{background:'#fff7f1',text:'#432a32',accent:'#c45155'},forest:{background:'#f1f8f2',text:'#193d38',accent:'#237966'}};
+         const palette = themes[event.target.value]; if (!palette) return;
+         presentationDeck.colors = {...palette};
+         const blend = (from,to,ratio) => '#' + [1,3,5].map(i => Math.round(parseInt(from.slice(i,i+2),16)*(1-ratio)+parseInt(to.slice(i,i+2),16)*ratio).toString(16).padStart(2,'0')).join('');
+         presentationDeck.slides.forEach(slide => {
+           const cover = slide.design?.variant === 'cover';
+           slide.background = cover ? blend(palette.accent,'#091b30',.75) : palette.background;
+           if (slide.design) Object.assign(slide.design,{accent:palette.accent,panel:blend(slide.background,cover ? '#ffffff' : palette.accent,cover ? .10 : .045),soft:blend(slide.background,cover ? '#ffffff' : palette.accent,cover ? .18 : .10)});
+           slide.elements.forEach(element => { if (element.style) element.style.color = cover ? '#ffffff' : element.kind === 'body' ? palette.text : palette.accent; });
+         });
+         for (const key of ['background','text','accent']) document.querySelector(`#presentation-${key}`).value = palette[key];
+         show(); notify('Тема применена. Сохраните правки.');
+       };
       container.querySelector('#slide-save').onclick = async event => {
         const button = event.currentTarget; button.disabled = true;
         try { await api(`/studies/${studyId}/presentation`,'PUT',presentationDeck); notify('Правки презентации сохранены'); }

@@ -19,7 +19,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
 
-from presentations import pptx_bytes
+from presentations import deck_from_outline, pptx_bytes, validate_deck
 from reports import analytical_pdf_bytes
 from server import create_server, init_db, run_media_monitor
 
@@ -857,6 +857,24 @@ class PlannerTest(unittest.TestCase):
         slides = Presentation(io.BytesIO(pptx_bytes(deck))).slides
         self.assertEqual(len(slides[0].shapes), 1)
         self.assertEqual(slides[0].shapes[0].text, "Старый слайд")
+
+    def test_presentation_layouts_survive_validation_and_match_export(self):
+        colors = {"background": "#f2f7fc", "text": "#17324d", "accent": "#147ca5"}
+        outline = {"slides": [{"title": f"Раздел {i}", "bullets": ["Содержательный тезис"],
+                               "summary": "Главный вывод"} for i in range(5)]}
+        deck = deck_from_outline(outline, 5, colors)
+        self.assertEqual([slide["design"]["layout"] for slide in deck["slides"]],
+                         ["classic", "split", "spotlight", "split", "classic"])
+        for index in (1, 2):
+            slide = deck["slides"][index]
+            self.assertLess(slide["elements"][1]["y"], 67)
+            self.assertNotEqual(slide["elements"][3]["x"], 10)
+        pages = Presentation(io.BytesIO(pptx_bytes(deck))).slides
+        self.assertIn("Главный вывод", [shape.text for shape in pages[2].shapes if shape.has_text_frame])
+        self.assertGreater(len(pages[1].shapes), len(deck["slides"][1]["elements"]) + 4)
+        deck["slides"][1]["design"]["layout"] = "invalid"
+        with self.assertRaises(ValueError):
+            validate_deck(deck)
 
 
 if __name__ == "__main__":

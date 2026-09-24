@@ -86,12 +86,14 @@ def validate_deck(deck):
             cleaned_slide["background"] = hex_color(slide["background"])
         if "design" in slide:
             design = slide["design"]
-            if not isinstance(design, dict) or design.get("variant") not in ("cover", "content", "closing"):
+            if not isinstance(design, dict) or design.get("variant") not in ("cover", "content", "closing") or design.get("layout", "classic") not in ("classic", "split", "spotlight"):
                 raise ValueError("Некорректное оформление слайда")
             cleaned_slide["design"] = {"variant": design["variant"],
                                         "panel": hex_color(design.get("panel")),
                                         "soft": hex_color(design.get("soft")),
                                         "accent": hex_color(design.get("accent"))}
+            if "layout" in design:
+                cleaned_slide["design"]["layout"] = design["layout"]
         cleaned["slides"].append(cleaned_slide)
     return cleaned
 
@@ -232,11 +234,23 @@ def deck_from_outline(outline, count, colors, template=None):
                                    "color": foreground if dark else colors["accent"]}})
         if summary and not template:
             elements.append({"kind": "callout", "text": summary, "x": 10, "y": 77, "w": 79, "h": 11,
-                             "style": {"font": "Aptos", "size": 14, "bold": True,
-                                       "color": foreground if dark else colors["accent"]}})
+                              "style": {"font": "Aptos", "size": 14, "bold": True,
+                                        "color": foreground if dark else colors["accent"]}})
+        layout = "classic"
+        if not template and variant == "content" and summary and len(body) < 360:
+            layout = "split" if index % 2 else "spotlight"
+            if layout == "split":
+                elements[1].update(x=11, y=40, w=37, h=42)
+                elements[-1].update(x=55, y=43, w=32, h=37)
+                elements[-1]["style"]["size"] = 20
+            else:
+                elements[1].update(x=11, y=66, w=77, h=20)
+                elements[-1].update(x=11, y=38, w=76, h=23)
+                elements[-1]["style"]["size"] = 24
         slide = {"elements": elements, "background": background,
-                 "design": {"variant": variant, "accent": colors["accent"],
-                            "panel": _blend(background, "#ffffff" if dark else colors["accent"], .10 if dark else .045),
+                  "design": {"variant": variant, "accent": colors["accent"],
+                             "layout": layout,
+                             "panel": _blend(background, "#ffffff" if dark else colors["accent"], .10 if dark else .045),
                             "soft": _blend(background, "#ffffff" if dark else colors["accent"], .18 if dark else .10)}}
         slides.append(slide)
     return validate_deck({"colors": colors, "slides": slides})
@@ -292,17 +306,26 @@ def pptx_bytes(deck):
                 decorations += 1
 
             variant = design["variant"]
+            layout = design.get("layout", "classic")
             background = item.get("background", deck["colors"]["background"])
             if variant == "cover":
                 decoration(MSO_SHAPE.OVAL, 70, -18, 50, 89, design["panel"])
                 decoration(MSO_SHAPE.OVAL, 80, 3, 30, 54, design["soft"])
                 decoration(MSO_SHAPE.RECTANGLE, 7, 23, .7, 53, design["accent"])
+            elif layout == "split":
+                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
+                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 52, 35, 40, 54, design["soft"])
+                decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
+            elif layout == "spotlight":
+                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
+                decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 8, 34, 84, 29, design["soft"])
+                decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
             else:
                 decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 7, 34, 86, 56, design["panel"])
                 decoration(MSO_SHAPE.RECTANGLE, 7, 34, .7, 56, design["accent"])
                 decoration(MSO_SHAPE.OVAL, 91, 8, 3, 5.3, design["soft"])
             decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 8, 4, 46, 8, design["soft"])
-            if any(element["kind"] == "callout" for element in item["elements"]):
+            if layout == "classic" and any(element["kind"] == "callout" for element in item["elements"]):
                 decoration(MSO_SHAPE.ROUNDED_RECTANGLE, 9, 76, 82, 13, design["soft"])
             decoration(MSO_SHAPE.RECTANGLE, 9, 92, 82, .25, design["soft"])
             footer = slide.shapes.add_textbox(int(presentation.slide_width*.87),
