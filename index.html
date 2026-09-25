@@ -433,10 +433,46 @@
     let mediaSelected = null;
     function renderMedia() {
       if (state.offline) return heading('Публичные источники','Медиаанализ','Для мониторинга требуется подключение к серверу.') + empty('Нет подключения','Подключитесь к серверу и откройте раздел снова.');
-       return heading('Публичные сообщества VK','Социальный анализ','Задайте исследовательский вопрос и регион — система найдёт публичные сообщества VK, изучит посты и комментарии и подготовит аналитический отчёт.') +
-          `<section class="box"><div class="box-title"><h2>Новое исследование VK</h2></div><form id="media-form" class="form-grid"><label class="field-label">Исследовательский вопрос<input name="question" maxlength="240" required placeholder="Что сейчас обсуждают жители региона?"></label><label class="field-label">Регион работы сообществ<input name="region" maxlength="180" required placeholder="Например: Луганская Народная Республика"></label><label class="field-label">Ссылки на группы VK <span class="muted">необязательно</span><textarea name="group_links" rows="3" placeholder="По одной ссылке на строку: https://vk.com/club123"></textarea></label><label class="field-label">Интервал обновления, минут<input name="interval_minutes" type="number" min="15" max="1440" value="60" required></label><button class="btn" type="submit">Начать VK-анализ</button></form><p class="muted">Если ссылки указаны, система проверяет эти публичные группы, а затем дополняет их автоматическим поиском. Можно указать любое количество сообществ. Нужна переменная VK_ACCESS_TOKEN. ИИ отделяет факты от гипотез и прикладывает ссылки на исходные материалы.</p></section><div class="media-grid"><section class="box"><h2>Исследования</h2><div class="media-list" id="media-topics">Загружаем…</div></section><section class="box" id="media-detail">Выберите исследование.</section></div>`;
+       return heading('Публичные источники','Социальный анализ','Задайте вопрос и регион, затем подключите публичные сообщества VK и Telegram. Перед подпиской Telegram сначала проверьте найденные каналы.') +
+          `<section class="box"><div class="box-title"><h2>Новое исследование</h2></div><form id="media-form" class="form-grid"><label class="field-label">Исследовательский вопрос<input name="question" maxlength="240" required placeholder="Что сейчас обсуждают жители региона?"></label><label class="field-label">Регион работы сообществ<input name="region" maxlength="180" required placeholder="Например: Луганская Народная Республика"></label><label class="field-label">Ссылки на группы VK <span class="muted">необязательно</span><textarea name="group_links" rows="3" placeholder="По одной ссылке на строку: https://vk.com/club123"></textarea></label><label class="field-label">Подтверждённые Telegram-каналы <span class="muted">необязательно</span><textarea name="telegram_channels" rows="3" placeholder="По одной ссылке или @username на строку"></textarea></label><label class="field-label">Интервал обновления, минут<input name="interval_minutes" type="number" min="15" max="1440" value="60" required></label><button class="btn" type="submit">Начать мониторинг</button></form><p class="muted">VK требует VK_ACCESS_TOKEN. Telegram использует отдельный пользовательский аккаунт Telethon: сначала авторизуйтесь, найдите каналы и явно подтвердите подписку. Сборщик получает публичные посты и доступные комментарии, а затем сохраняет ссылки на источники.</p><div class="box" style="margin-top:18px;background:#f8fcff"><div class="box-title"><h3>Подключение Telegram</h3><span id="telegram-status" class="muted">Проверяем…</span></div><div class="form-two"><label class="field-label">Телефон<input id="telegram-phone" type="tel" placeholder="+79991234567" autocomplete="tel"></label><button type="button" class="btn secondary" id="telegram-auth-start">Получить код</button></div><div id="telegram-auth-code" class="form-two" hidden><label class="field-label">Код из Telegram<input id="telegram-code" inputmode="numeric" autocomplete="one-time-code"></label><label class="field-label">Пароль 2FA <span class="muted">если включён</span><input id="telegram-password" type="password" autocomplete="current-password"></label><button type="button" class="btn secondary" id="telegram-auth-verify">Подтвердить вход</button></div><div class="actions"><button type="button" class="btn secondary" id="telegram-search">Найти публичные каналы</button></div><div id="telegram-results" class="media-list"></div></div></section><div class="media-grid"><section class="box"><h2>Исследования</h2><div class="media-list" id="media-topics">Загружаем…</div></section><section class="box" id="media-detail">Выберите исследование.</section></div>`;
     }
-    async function loadMedia() {
+     async function bindTelegramControls() {
+       const status = document.querySelector('#telegram-status');
+       const results = document.querySelector('#telegram-results');
+       const form = document.querySelector('#media-form');
+       if (!status || !results || !form) return;
+       try {
+         const telegram = await api('/telegram/status');
+         status.textContent = telegram.authorized ? 'Авторизован' : (telegram.message || 'Не авторизован');
+         status.style.color = telegram.authorized ? '#27789e' : '#a34442';
+       } catch (error) { status.textContent = error.message; }
+       const start = document.querySelector('#telegram-auth-start');
+       const codeBox = document.querySelector('#telegram-auth-code');
+       start.onclick = async () => {
+         start.disabled = true;
+         try { await api('/telegram/auth/start','POST',{phone:document.querySelector('#telegram-phone').value}); codeBox.hidden = false; notify('Код отправлен в Telegram'); }
+         catch (error) { notify(error.message,true); } finally { start.disabled = false; }
+       };
+       document.querySelector('#telegram-auth-verify').onclick = async () => {
+         const button = document.querySelector('#telegram-auth-verify'); button.disabled = true;
+         try { const result = await api('/telegram/auth/verify','POST',{code:document.querySelector('#telegram-code').value,password:document.querySelector('#telegram-password').value}); if (result.password_required) notify('Введите пароль двухэтапной проверки Telegram',true); else { status.textContent = 'Авторизован'; status.style.color = '#27789e'; notify('Telegram подключён'); } }
+         catch (error) { notify(error.message,true); } finally { button.disabled = false; }
+       };
+       document.querySelector('#telegram-search').onclick = async () => {
+         const button = document.querySelector('#telegram-search'); button.disabled = true; results.textContent = 'Ищем публичные каналы…';
+         try {
+           const fields = new FormData(form); const found = await api('/telegram/search','POST',{question:fields.get('question'),region:fields.get('region')});
+           results.innerHTML = found.channels.length ? found.channels.map(channel => `<label class="member-check"><input type="checkbox" value="${esc(channel.link)}" data-telegram-channel> <strong>${esc(channel.title)}</strong><br><small>${esc(channel.link)}${channel.members ? ` · ${channel.members} участников` : ''}</small></label>`).join('') + '<button type="button" class="btn small" id="telegram-confirm">Подписаться и добавить выбранные</button>' : '<p class="muted">Каналы не найдены.</p>';
+           document.querySelector('#telegram-confirm')?.addEventListener('click', async () => {
+             const selected = [...results.querySelectorAll('[data-telegram-channel]:checked')].map(input => input.value); if (!selected.length) { notify('Выберите хотя бы один канал',true); return; }
+             const confirmButton = document.querySelector('#telegram-confirm'); confirmButton.disabled = true;
+             try { const response = await api('/telegram/subscribe','POST',{channels:selected}); const accepted = response.channels.filter(item => item.status === 'subscribed').map(item => `https://t.me/${item.username}`); const area = form.querySelector('[name="telegram_channels"]'); area.value = [...new Set(area.value.split(/\r?\n/).map(item => item.trim()).filter(Boolean).concat(accepted))].join('\n'); notify(`Добавлено каналов: ${accepted.length}`); }
+             catch (error) { notify(error.message,true); } finally { confirmButton.disabled = false; }
+           });
+         } catch (error) { results.textContent = error.message; } finally { button.disabled = false; }
+       };
+     }
+     async function loadMedia() {
       const list = document.querySelector('#media-topics');
       if (!list) return;
       document.querySelector('#media-form').onsubmit = async event => {
@@ -444,11 +480,12 @@
         const form = event.currentTarget, button = form.querySelector('button'); button.disabled = true;
         try {
           const values = Object.fromEntries(new FormData(form));
-           const result = await api('/media','POST',{...values,region:values.region,interval_minutes:Number(values.interval_minutes),countries:['RU']});
+           const result = await api('/media','POST',{...values,region:values.region,telegram_channels:values.telegram_channels.split(/\r?\n/).map(item => item.trim()).filter(Boolean),interval_minutes:Number(values.interval_minutes),countries:['RU']});
           mediaSelected = result.id; form.reset(); await loadMedia(); notify('Тема добавлена');
         } catch (error) { notify(error.message,true); } finally { if (button.isConnected) button.disabled = false; }
       };
-      try {
+       bindTelegramControls();
+       try {
         const {monitors,agents,available_countries} = await api('/media');
         if (!list.isConnected || state.tab !== 'media') return;
         const countrySelect = document.querySelector('#media-countries');

@@ -129,6 +129,32 @@ class SummaryTest(unittest.TestCase):
 
         self.assertIn(("groups.getById", {"group_ids": "example"}), calls)
 
+    def test_telegram_collection_is_saved_as_social_source(self):
+        calls = []
+
+        def fake_telegram(question, region, channels):
+            calls.append((question, region, channels))
+            return [{"source": "telegram", "title": "Обсуждение события",
+                     "excerpt": "Публичный пост канала", "url": "https://t.me/example/42",
+                     "published": "2026-01-01", "item_type": "post", "community": "Канал",
+                     "author": "Канал", "engagement": 7}]
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = sqlite3.connect(f"{directory}/media.db")
+            db.execute("""CREATE TABLE media_items (
+                id INTEGER PRIMARY KEY, monitor_id INTEGER, source TEXT, country TEXT, title TEXT, excerpt TEXT,
+                url TEXT UNIQUE, published TEXT, collected_at TEXT, item_type TEXT, author TEXT, community TEXT, engagement INTEGER)""")
+            monitor = {"id": 1, "question": "события", "region": "ЛНР", "countries": "[]", "hashtag": "",
+                       "telegram_channels": "[\"https://t.me/example\"]"}
+            added, result = collect(db, monitor, fetch_vk=lambda question, region: [], fetch_telegram=fake_telegram)
+            db.commit()
+            row = db.execute("SELECT source, url, community FROM media_items").fetchone()
+            db.close()
+        self.assertEqual(calls, [("события", "ЛНР", ["https://t.me/example"])])
+        self.assertEqual(added, 1)
+        self.assertEqual(result["social"], "vk: Добавлено: 0; telegram: Добавлено: 1")
+        self.assertEqual(row, ("telegram", "https://t.me/example/42", "Канал"))
+
 
 if __name__ == "__main__":
     unittest.main()

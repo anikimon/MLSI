@@ -162,7 +162,30 @@ class PlannerTest(unittest.TestCase):
         init_db(path)
         with closing(sqlite3.connect(path)) as db:
             self.assertEqual(db.execute("SELECT countries FROM media_monitors WHERE id = 1").fetchone()[0], "[]")
+            self.assertEqual(db.execute("SELECT telegram_channels FROM media_monitors WHERE id = 1").fetchone()[0], "[]")
             self.assertEqual(db.execute("SELECT country FROM media_items WHERE id = 1").fetchone()[0], "RU")
+
+    def test_telegram_endpoints_require_configuration_and_validate_channels(self):
+        self.assertEqual(self.request(self.admin, "/telegram/status")[0], 401)
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        with patch.dict(os.environ, {"TELEGRAM_API_ID": "", "TELEGRAM_API_HASH": ""}):
+            status, data = self.request(self.admin, "/telegram/status")
+            self.assertEqual(status, 200)
+            self.assertFalse(data["configured"])
+            self.assertFalse(data["authorized"])
+            self.assertEqual(self.request(self.admin, "/telegram/auth/start", "POST", {"phone": "123"})[0], 400)
+            self.assertEqual(self.request(self.admin, "/telegram/search", "POST", {"question": "", "region": "ЛНР"})[0], 400)
+            self.assertEqual(self.request(self.admin, "/telegram/search", "POST", {"question": "тема", "region": "ЛНР"})[0], 503)
+            self.assertEqual(self.request(self.admin, "/telegram/subscribe", "POST", {"channels": []})[0], 400)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {
+            "question": "Тема", "region": "ЛНР", "telegram_channels": ["bad channel!"], "countries": ["RU"]})[0], 400)
+        status, created = self.request(self.admin, "/media", "POST", {
+            "question": "Тема", "region": "ЛНР",
+            "telegram_channels": ["https://t.me/example", "@another_channel", "https://t.me/example"],
+            "countries": ["RU"]})
+        self.assertEqual(status, 201)
+        monitor = self.request(self.admin, f"/media/{created['id']}")[1]["monitor"]
+        self.assertEqual(monitor["telegram_channels"], ["https://t.me/example", "@another_channel"])
 
     def test_existing_studies_gain_goal_and_tasks(self):
         path = Path(self.temp.name) / "legacy.db"

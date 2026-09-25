@@ -3,16 +3,22 @@
 import html
 import json
 import os
+import asyncio
 import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
+from threading import Lock
 
 
 MAX_RESPONSE = 1024 * 1024
-AGENTS = ("VK · публичные сообщества", "VK · посты и комментарии", "Аналитик · тональность и тренды", "ИИ · подробный аналитический отчёт")
+AGENTS = ("VK · публичные сообщества", "VK · посты и комментарии", "Telegram · публичные каналы", "Telegram · посты и комментарии", "Аналитик · тональность и тренды", "ИИ · подробный аналитический отчёт")
+TELEGRAM_LOCK = Lock()
+TELEGRAM_AUTH = {}
+ROOT = Path(__file__).resolve().parent
 STOP = {"это", "как", "что", "для", "или", "при", "про", "the", "and", "with", "from", "сми", "новости"}
 COUNTRIES = {
     "US": ("США", "en", "United States", "США", "United States", "USA"),
@@ -83,6 +89,211 @@ def vk_api(method, params):
         error = data.get("error", {}) if isinstance(data, dict) else {}
         raise ValueError("VK API: " + str(error.get("error_msg", "неожиданный ответ"))[:120])
     return data.get("response", {})
+
+
+def telegram_configured():
+    return bool(os.environ.get("TELEGRAM_API_ID", "").strip() and os.environ.get("TELEGRAM_API_HASH", "").strip())
+
+
+def telegram_session_name():
+    return os.environ.get("TELEGRAM_SESSION_FILE", str(ROOT / "data" / "telegram.session"))
+
+
+def _telegram_client():
+    try:
+        from telethon import TelegramClient
+    except ImportError as exc:
+        raise ValueError("Telethon не установлен. Добавьте зависимость telethon") from exc
+    if not telegram_configured():
+        raise ValueError("TELEGRAM_API_ID и TELEGRAM_API_HASH не настроены")
+    try:
+        api_id = int(os.environ["TELEGRAM_API_ID"])
+    except ValueError as exc:
+        raise ValueError("TELEGRAM_API_ID должен быть числом") from exc
+    session = os.environ.get("TELEGRAM_SESSION", "").strip() or telegram_session_name()
+    Path(session).parent.mkdir(parents=True, exist_ok=True)
+    return TelegramClient(session, api_id, os.environ["TELEGRAM_API_HASH"].strip())
+
+
+def _telegram_run(operation):
+    with TELEGRAM_LOCK:
+        return asyncio.run(operation())
+
+
+async def _telegram_authorized(client):
+    await client.connect()
+    authorized = await client.is_user_authorized()
+    await client.disconnect()
+    return authorized
+
+
+def telegram_status():
+    if not telegram_configured():
+        return {"configured": False, "authorized": False, "message": "Задайте TELEGRAM_API_ID и TELEGRAM_API_HASH"}
+    try:
+        authorized = _telegram_run(lambda: _telegram_authorized(_telegram_client()))
+    except (ValueError, OSError) as exc:
+        return {"configured": True, "authorized": False, "message": str(exc)[:180]}
+    return {"configured": True, "authorized": authorized, "message": "Готово" if authorized else "Требуется авторизация"}
+
+
+async def _telegram_start_auth(phone):
+    client = _telegram_client()
+    await client.connect()
+    sent = await client.send_code_request(phone)
+    await client.disconnect()
+    TELEGRAM_AUTH.update({"phone": phone, "phone_code_hash": sent.phone_code_hash})
+    return {"ok": True, "password_required": False}
+
+
+def telegram_start_auth(phone):
+    phone = str(phone or "").strip()
+    if not re.fullmatch(r"\+[1-9]\d{6,14}", phone):
+        raise ValueError("Укажите номер телефона в международном формате, например +79991234567")
+    return _telegram_run(lambda: _telegram_start_auth(phone))
+
+
+async def _telegram_verify(code, password=""):
+    from telethon.errors import SessionPasswordNeededError
+    if not TELEGRAM_AUTH.get("phone_code_hash"):
+        raise ValueError("Сначала запросите код подтверждения")
+    client = _telegram_client()
+    await client.connect()
+    try:
+        if code:
+            await client.sign_in(TELEGRAM_AUTH["phone"], code, phone_code_hash=TELEGRAM_AUTH["phone_code_hash"])
+        elif not password:
+            raise ValueError("Введите код подтверждения")
+    except SessionPasswordNeededError:
+        if not password:
+            await client.disconnect()
+            return {"ok": False, "password_required": True}
+        await client.sign_in(password=password)
+    authorized = await client.is_user_authorized()
+    await client.disconnect()
+    if not authorized:
+        raise ValueError("Telegram не подтвердил вход")
+    TELEGRAM_AUTH.clear()
+    return {"ok": True, "password_required": False}
+
+
+def telegram_verify(code="", password=""):
+    return _telegram_run(lambda: _telegram_verify(str(code or "").strip(), str(password or "")))
+
+
+def _telegram_username(value):
+    text = str(value or "").strip()
+    parsed = urllib.parse.urlsplit(text if "://" in text else "https://" + text)
+    if parsed.hostname not in {"t.me", "telegram.me", "www.t.me", "www.telegram.me"}:
+        return text.lstrip("@").split("/")[0]
+    path = parsed.path.strip("/").split("/")
+    if not path or path[0].startswith("+") or path[0] in {"joinchat", "c"}:
+        return ""
+    return path[0].lstrip("@").split("?")[0]
+
+
+async def _telegram_search(question, region=""):
+    client = _telegram_client()
+    await client.connect()
+    try:
+        from telethon import functions, types
+        queries = []
+        for query in (question, region, f"{question} {region}"):
+            query = str(query or "").strip()
+            if query and query not in queries:
+                queries.append(query)
+        candidates = {}
+        for query in queries:
+            result = await client(functions.contacts.SearchRequest(q=query, limit=20))
+            for chat in result.chats:
+                if not isinstance(chat, (types.Channel, types.Chat)):
+                    continue
+                username = getattr(chat, "username", "")
+                if not username or not getattr(chat, "broadcast", True):
+                    continue
+                candidates[username.lower()] = {"username": username, "title": getattr(chat, "title", username),
+                    "link": f"https://t.me/{username}", "members": getattr(chat, "participants_count", None)}
+            if len(candidates) >= 20:
+                break
+        return list(candidates.values())[:20]
+    finally:
+        await client.disconnect()
+
+
+def telegram_search(question, region=""):
+    return _telegram_run(lambda: _telegram_search(question, region))
+
+
+async def _telegram_subscribe(channels):
+    from telethon import functions
+    client = _telegram_client()
+    await client.connect()
+    result = []
+    try:
+        for raw in channels:
+            username = _telegram_username(raw)
+            if not username or not re.fullmatch(r"[A-Za-z0-9_]{4,64}", username):
+                continue
+            try:
+                await client(functions.channels.JoinChannelRequest(username))
+                result.append({"username": username, "status": "subscribed"})
+            except Exception as exc:
+                result.append({"username": username, "status": "error", "message": str(exc)[:120]})
+    finally:
+        await client.disconnect()
+    return result
+
+
+def telegram_subscribe(channels):
+    if not isinstance(channels, list) or not channels:
+        raise ValueError("Выберите хотя бы один Telegram-канал")
+    return _telegram_run(lambda: _telegram_subscribe(channels))
+
+
+async def _telegram_agent(question, region="", channels=()):
+    client = _telegram_client()
+    await client.connect()
+    records = []
+    try:
+        for raw in channels:
+            username = _telegram_username(raw)
+            if not username:
+                continue
+            try:
+                entity = await client.get_entity(username)
+            except Exception:
+                continue
+            title = clean_markup(getattr(entity, "title", username))[:180]
+            public_name = getattr(entity, "username", None) or username
+            async for message in client.iter_messages(entity, limit=20):
+                text = clean_markup(getattr(message, "message", ""))[:900]
+                message_id = getattr(message, "id", 0)
+                if not text or not message_id:
+                    continue
+                url = f"https://t.me/{public_name}/{message_id}"
+                records.append({"source": "telegram", "title": text[:180], "excerpt": text, "url": url,
+                                "published": str(getattr(message, "date", ""))[:100], "item_type": "post",
+                                "community": title, "region": region[:180], "author": title,
+                                "engagement": int(getattr(message, "views", 0) or 0) + int(getattr(message, "forwards", 0) or 0)})
+                try:
+                    async for comment in client.iter_messages(entity, reply_to=message_id, limit=20):
+                        comment_text = clean_markup(getattr(comment, "message", ""))[:900]
+                        comment_id = getattr(comment, "id", 0)
+                        if comment_text and comment_id:
+                            records.append({"source": "telegram", "title": comment_text[:180], "excerpt": comment_text,
+                                            "url": url + "?comment=" + str(comment_id),
+                                            "published": str(getattr(comment, "date", ""))[:100], "item_type": "comment",
+                                            "community": title, "region": region[:180], "author": "Telegram user",
+                                            "engagement": int(getattr(comment, "views", 0) or 0)})
+                except Exception:
+                    pass
+    finally:
+        await client.disconnect()
+    return records
+
+
+def telegram_agent(question, region="", channels=()):
+    return _telegram_run(lambda: _telegram_agent(question, region, channels))
 
 
 def vk_agent(question, region="", group_links=()):
@@ -318,7 +529,7 @@ def summarize(rows, countries=()):
     narrative_counts = Counter(theme["name"] for theme in overview(rows)["themes"])
     narratives = [{"name": name, "count": count, "share": round(count / len(rows) * 100, 1) if rows else 0}
                   for name, count in narrative_counts.most_common()]
-    social_text = " ".join(row["title"] + " " + row.get("excerpt", "") for row in rows if row.get("source") in ("social", "vk")).lower()
+    social_text = " ".join(row["title"] + " " + row.get("excerpt", "") for row in rows if row.get("source") in ("social", "vk", "telegram")).lower()
     SOCIAL_GROUPS = {
         "Страхи": ("страш", "боят", "опасн", "угроз", "страдан", "fear", "afraid", "danger", "worry"),
         "Потребности": ("нужн", "требу", "хотим", "нужда", "need", "want", "require", "support"),
@@ -327,7 +538,7 @@ def summarize(rows, countries=()):
     }
     social_analysis = []
     for label, stems in SOCIAL_GROUPS.items():
-        hits = sum(1 for row in rows if row.get("source") in ("social", "vk") and any(stem in (row["title"] + " " + row.get("excerpt", "")).lower() for stem in stems))
+        hits = sum(1 for row in rows if row.get("source") in ("social", "vk", "telegram") and any(stem in (row["title"] + " " + row.get("excerpt", "")).lower() for stem in stems))
         if hits:
             social_analysis.append({"name": label, "count": hits, "share": round(hits / max(1, sum(row.get("source") in ("social", "vk") for row in rows)) * 100, 1)})
     persons = Counter(row.get("author", "") for row in rows if row.get("author") and row.get("source") == "vk")
@@ -338,17 +549,17 @@ def summarize(rows, countries=()):
         text = (row.get("title", "") + " " + row.get("excerpt", "")).lower()
         pos, neg = sum(text.count(word) for word in positive), sum(text.count(word) for word in negative)
         sentiment["positive" if pos > neg else "negative" if neg > pos else "neutral"] += 1
-    return {"total": len(rows), "news": counts["news"], "social": counts["social"],
+    return {"total": len(rows), "news": counts["news"], "social": counts["social"], "telegram": counts["telegram"],
             "terms": [{"word": word, "count": count} for word, count in words.most_common(10)],
             "overall": overview(rows), "countries": by_country, "narratives": narratives,
-            "social_analysis": social_analysis, "vk_communities": Counter(row.get("community", "") for row in rows if row.get("community")).most_common(10),
+            "social_analysis": social_analysis, "vk_communities": Counter(row.get("community", "") for row in rows if row.get("community") and row.get("source") == "vk").most_common(10),
             "vk_persons": [{"name": name, "count": count} for name, count in persons.most_common(10)],
             "sentiment": {"positive": sentiment["positive"], "neutral": sentiment["neutral"], "negative": sentiment["negative"]},
-            "unassigned_social": sum(row["source"] == "social" and not row.get("country") for row in rows),
+            "unassigned_social": sum(row["source"] in ("social", "telegram") and not row.get("country") for row in rows),
             "calculated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
-def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch_bluesky=bluesky_agent, fetch_vk=vk_agent):
+def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch_bluesky=bluesky_agent, fetch_vk=vk_agent, fetch_telegram=telegram_agent):
     """Each collector fails independently; previously saved observations remain available."""
     results = {}
     new_count = 0
@@ -356,6 +567,7 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
     countries = json.loads(monitor.get("countries") or "[]")
     # Existing monitors retain their former Russian-locale search.
     region = str(monitor.get("region", "")).strip()
+    telegram_channels = json.loads(monitor.get("telegram_channels") or "[]")
     if region:
         links = json.loads(monitor.get("vk_group_links") or "[]")
         args = (monitor["question"], region, links) if links else (monitor["question"], region)
@@ -367,6 +579,8 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
         searches.append(("social", fetch_bluesky, (monitor["question"],), "bluesky"))
     if not region and monitor.get("vk_query", monitor["question"]):
         searches.append(("vk", fetch_vk, (monitor.get("vk_query") or monitor["question"],), "vk"))
+    if telegram_channels:
+        searches.append(("telegram", fetch_telegram, (monitor["question"], region, telegram_channels), "telegram"))
     for name, agent, args, code in searches:
         label = f"news:{code}" if countries and name == "news" else (code if name == "social" else name)
         if code == "mastodon" and not monitor["hashtag"]:
@@ -377,7 +591,7 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
             if not isinstance(records, list):
                 raise ValueError("Источник вернул некорректный список")
             batches[label] = (name, "" if name in ("social", "vk") else code, records[:100])
-        except (ValueError, OSError, ET.ParseError, TypeError, json.JSONDecodeError) as exc:
+        except Exception as exc:
             results[label] = "Ошибка источника: " + str(exc)[:140]
     for label, (name, code, records) in batches.items():
         try:
@@ -402,6 +616,7 @@ def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch
             results[label] = "Ошибка источника: " + str(exc)[:140]
     if countries:
         results["news"] = "; ".join(f"{COUNTRIES[code][0]}: {results.get('news:' + code, 'нет данных')}" for code in countries)
-    results["social"] = (f"vk: {results.get('vk', 'нет данных')}" if region else
-                         "; ".join(f"{source}: {results.get(source, 'нет данных')}" for source in ("mastodon", "bluesky", "vk")))
+    social_results = [f"telegram: {results.get('telegram', 'нет данных')}"] if telegram_channels else []
+    results["social"] = ("; ".join([f"vk: {results.get('vk', 'нет данных')}", *social_results]) if region else
+                         "; ".join([*(f"{source}: {results.get(source, 'нет данных')}" for source in ("mastodon", "bluesky", "vk")), *social_results]))
     return new_count, results

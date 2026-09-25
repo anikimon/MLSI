@@ -23,7 +23,9 @@ from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
-from media_monitor import AGENTS, COUNTRIES, collect as collect_media, summarize as summarize_media
+from media_monitor import (AGENTS, COUNTRIES, collect as collect_media, summarize as summarize_media,
+                           telegram_search, telegram_start_auth, telegram_status, telegram_subscribe,
+                           telegram_verify)
 from reports import analytical_pdf_bytes, analytical_snapshot, build_member_quotas, build_quotas, build_report, parse_weight, pdf_bytes, read_excel
 from presentations import PRESENTATION_PALETTES, deck_from_outline, extract_template_style, pptx_bytes, validate_colors, validate_deck
 
@@ -203,7 +205,8 @@ def init_db(path):
             );
             CREATE TABLE IF NOT EXISTS media_monitors (
                 id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '', vk_query TEXT NOT NULL DEFAULT '',
-                region TEXT NOT NULL DEFAULT '', vk_group_links TEXT NOT NULL DEFAULT '[]', ai_report TEXT NOT NULL DEFAULT '',
+                region TEXT NOT NULL DEFAULT '', vk_group_links TEXT NOT NULL DEFAULT '[]', telegram_channels TEXT NOT NULL DEFAULT '[]',
+                ai_report TEXT NOT NULL DEFAULT '',
                 countries TEXT NOT NULL DEFAULT '[]',
                 enabled INTEGER NOT NULL DEFAULT 1, interval_minutes INTEGER NOT NULL DEFAULT 30,
                 next_run TEXT NOT NULL, running_until TEXT, last_run TEXT, last_result TEXT NOT NULL DEFAULT '{}'
@@ -229,6 +232,8 @@ def init_db(path):
                 db.execute("ALTER TABLE media_monitors ADD COLUMN ai_report TEXT NOT NULL DEFAULT ''")
             if "vk_group_links" not in monitor_columns:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN vk_group_links TEXT NOT NULL DEFAULT '[]'")
+            if "telegram_channels" not in monitor_columns:
+                db.execute("ALTER TABLE media_monitors ADD COLUMN telegram_channels TEXT NOT NULL DEFAULT '[]'")
             if "country" not in {row["name"] for row in db.execute("PRAGMA table_info(media_items)")}:
                 db.execute("ALTER TABLE media_items ADD COLUMN country TEXT NOT NULL DEFAULT ''")
                 db.execute("UPDATE media_items SET country = 'RU' WHERE source = 'news'")
@@ -558,6 +563,9 @@ class Handler(BaseHTTPRequestHandler):
         method = self.command
         if path == "/api/media" or re.fullmatch(r"/api/media/\d+(?:/(?:run|export\.csv|export\.json|export\.md))?", path):
             self.media_route(db, path, method)
+            return
+        if path.startswith("/api/telegram"):
+            self.telegram_route(db, path, method)
             return
         if path == "/api/session" and method == "GET":
             user = self.current_user(db)
@@ -1481,6 +1489,61 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(409, "Идентификатор операции уже использован")
         return True
 
+    def telegram_route(self, db, path, method):
+        self.require(db, {"admin", "researcher"})
+        if path == "/api/telegram/status" and method == "GET":
+            self.send_json(200, telegram_status())
+            return
+        if path == "/api/telegram/auth/start" and method == "POST":
+            data = self.read_json()
+            try:
+                result = telegram_start_auth(data.get("phone", ""))
+            except Exception as exc:
+                raise ApiError(400, str(exc)[:200]) from exc
+            self.send_json(200, result)
+            return
+        if path == "/api/telegram/auth/verify" and method == "POST":
+            data = self.read_json()
+            try:
+                result = telegram_verify(data.get("code", ""), data.get("password", ""))
+            except Exception as exc:
+                raise ApiError(400, str(exc)[:200]) from exc
+            self.send_json(200, result)
+            return
+        if path == "/api/telegram/search" and method == "POST":
+            data = self.read_json()
+            question = clean_text(data.get("question", ""), 240, True)
+            region = clean_text(data.get("region", ""), 180, False)
+            try:
+                channels = telegram_search(question, region)
+            except Exception as exc:
+                raise ApiError(503, str(exc)[:200]) from exc
+            self.send_json(200, {"channels": channels})
+            return
+        if path == "/api/telegram/subscribe" and method == "POST":
+            data = self.read_json()
+            channels = data.get("channels", [])
+            if not isinstance(channels, list) or not 1 <= len(channels) <= 50:
+                raise ApiError(400, "Выберите от 1 до 50 Telegram-каналов")
+            try:
+                result = telegram_subscribe(channels)
+            except Exception as exc:
+                raise ApiError(503, str(exc)[:200]) from exc
+            self.send_json(200, {"channels": result})
+            return
+        raise ApiError(404, "Telegram endpoint не найден")
+
+    @staticmethod
+    def telegram_channels(data):
+        channels = data.get("telegram_channels", [])
+        if isinstance(channels, str):
+            channels = [item.strip() for item in channels.splitlines() if item.strip()]
+        if not isinstance(channels, list) or len(channels) > 50 or any(
+                not isinstance(item, str) or not re.fullmatch(r"(?:https?://(?:www\.)?(?:t\.me|telegram\.me)/[A-Za-z0-9_]{4,64}|@?[A-Za-z0-9_]{4,64})", item.strip(), re.I)
+                for item in channels):
+            raise ApiError(400, "Укажите до 50 публичных Telegram-каналов ссылками или @username")
+        return list(dict.fromkeys(item.strip() for item in channels))
+
     def media_route(self, db, path, method):
         self.require(db, {"admin", "researcher"})
         match = re.fullmatch(r"/api/media/(\d+)(?:/(run|export\.csv|export\.json|export\.md))?", path)
@@ -1492,6 +1555,7 @@ class Handler(BaseHTTPRequestHandler):
                 for monitor in monitors:
                     monitor["countries"] = json.loads(monitor["countries"])
                     monitor["vk_group_links"] = json.loads(monitor.get("vk_group_links") or "[]")
+                    monitor["telegram_channels"] = json.loads(monitor.get("telegram_channels") or "[]")
                 self.send_json(200, {"monitors": monitors, "agents": AGENTS,
                                      "available_countries": [{"code": code, "name": info[0]} for code, info in COUNTRIES.items()]})
                 return
@@ -1505,6 +1569,7 @@ class Handler(BaseHTTPRequestHandler):
                 group_links = [link.strip() for link in raw_links.splitlines() if link.strip()]
                 if any(not re.fullmatch(r"https?://(?:www\.)?(?:vk\.com|vk\.ru)/(?:club|public|group)?/?[A-Za-z0-9_.-]+/?(?:\?[A-Za-z0-9_.=&%-]+)?", link, re.I) for link in group_links):
                     raise ApiError(400, "Укажите корректные ссылки на группы VK, по одной на строку")
+                telegram_channels = self.telegram_channels(data)
                 hashtag = data.get("hashtag", "")
                 if not isinstance(hashtag, str) or not re.fullmatch(r"#?[\wа-яА-ЯёЁ]{0,60}", hashtag):
                     raise ApiError(400, "Укажите один хэштег без пробелов или оставьте поле пустым")
@@ -1519,8 +1584,9 @@ class Handler(BaseHTTPRequestHandler):
                         not isinstance(code, str) or code not in COUNTRIES for code in countries) or len(set(countries)) != len(countries):
                     raise ApiError(400, f"Выберите от 1 до {len(COUNTRIES)} разных стран из списка")
                 cursor = db.execute("""INSERT INTO media_monitors
-                    (question, hashtag, vk_query, region, vk_group_links, countries, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (question, hashtag, vk_query, region, json.dumps(group_links, ensure_ascii=False), json.dumps(countries), interval, now()))
+                    (question, hashtag, vk_query, region, vk_group_links, telegram_channels, countries, interval_minutes, next_run)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (question, hashtag, vk_query, region, json.dumps(group_links, ensure_ascii=False), json.dumps(telegram_channels, ensure_ascii=False), json.dumps(countries), interval, now()))
                 self.send_json(201, {"id": cursor.lastrowid})
                 return
             raise ApiError(405, "Метод не поддерживается")
@@ -1556,6 +1622,7 @@ class Handler(BaseHTTPRequestHandler):
             selected = json.loads(row["countries"])
             monitor = {**dict(row), "countries": selected,
                        "vk_group_links": json.loads(row["vk_group_links"] or "[]"),
+                       "telegram_channels": json.loads(row["telegram_channels"] or "[]"),
                        "last_result": json.loads(row["last_result"])}
             summary = summarize_media(rows, selected or ["RU"])
             if action is None or action == "export.json":
