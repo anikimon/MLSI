@@ -224,6 +224,8 @@
     .focus-tabs button { flex:1; min-width:0; border:0; border-radius:7px; padding:11px 4px; background:transparent; color:var(--navy); font:inherit; font-size:12px; font-weight:700; overflow-wrap:anywhere; cursor:pointer; }
     .focus-tabs button[aria-pressed="true"] { background:#fff; box-shadow:0 2px 8px #1d56701a; }
     .focus-pane[hidden] { display:none; }
+    .digital-dialog { max-height:45vh; overflow:auto; margin:16px 0; padding:12px; border:1px solid var(--line); border-radius:10px; }
+    .digital-dialog .chat-message { margin-bottom:12px; }
     #focus-guide-stop[hidden] { display:none; }
     .editor-layout { display:grid; grid-template-columns:minmax(0,2.4fr) minmax(285px,1fr); gap:18px; align-items:start; }
     .editor-toolbar { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:17px; }
@@ -403,7 +405,7 @@
         if (!state.offline) loadFocus(s.id); else document.querySelector('#focus-list').textContent = 'Фокус-группы доступны при подключении к серверу.';
         const chat = document.querySelector('#chat-form'); if (chat) chat.onsubmit = event => sendMessage(event, s.id);
       }
-      if (state.selected == null && state.tab === 'focus' && !state.offline) state.studies.forEach(s => loadFocus(s.id));
+      if (state.selected == null && state.tab === 'focus' && !state.offline) state.studies.forEach(s => { loadFocus(s.id); loadDigitalFocus(s.id); });
       if (state.selected == null && state.tab === 'editor' && !state.offline && state.studies.length) bindEditor();
       if (state.selected == null && state.tab === 'media' && !state.offline) loadMedia();
       if (calendarView && !state.offline) loadCalendar();
@@ -590,7 +592,7 @@
       return `<div style="margin-top:25px"><button class="back" data-action="back">← Все исследования</button></div>${heading('Исследование / '+String(s.id).padStart(3,'0'),esc(s.title),'Создано '+date(s.created_at),canManage() ? `<button class="btn secondary" data-action="edit-study" data-id="${s.id}">Изменить проект</button>` : '')}<div class="detail-layout"><div><section class="box"><div class="box-title"><h2>Карточка проекта</h2><span class="badge ${s.stage}">${stages[s.stage]}</span></div><p class="description">${esc(s.description || 'Описание исследования пока не добавлено.')}</p><div class="info-grid"><div><div class="info-label">Ответственный</div><div class="info-value">${esc(s.responsible_name || 'Не назначен')}</div></div><div><div class="info-label">Срок завершения</div><div class="info-value">${date(s.due_date)}</div></div></div></section><section class="box"><div class="box-title"><h2>Документы проекта</h2><span class="muted">${s.files.length} файлов</span></div>${s.files.length ? s.files.map(f => `<div class="file-row"><span class="file-icon">▤</span><a href="/api/studies/${s.id}/files/${f.id}" title="Скачать ${esc(f.name)}">${esc(f.name)}</a><small>${fileKinds[f.kind]} · ${(f.size/1024).toFixed(0)} КБ</small></div>`).join('') : '<p class="muted">Здесь будут ТЗ, анкета, гайд и другие материалы.</p>'}${canManage() ? `<form id="upload-form" class="upload-form" data-id="${s.id}"><input name="file" type="file" required aria-label="Выберите файл"><select name="kind" aria-label="Тип файла"><option value="brief">ТЗ</option><option value="questionnaire">Анкета</option><option value="guide">Гайд</option><option value="other">Другое</option></select><button class="btn small secondary" type="submit">Загрузить</button></form><p class="muted" style="margin:9px 0 0">До 5 МБ на файл. Для интерактивного опроса заполните анкету справа.</p>` : ''}</section></div><div><section class="box"><div class="box-title"><h2>Этап исследования</h2></div><div class="stage-list">${stageKeys.map((key,i) => canManage() ? `<button class="stage ${i === current ? 'current' : i < current ? 'past' : ''}" data-action="stage" data-id="${s.id}" data-stage="${key}">${stages[key]}</button>` : `<div class="stage ${i === current ? 'current' : i < current ? 'past' : ''}">${stages[key]}</div>`).join('')}</div><p class="muted">${canManage() ? 'Нажмите на этап, чтобы обновить статус проекта.' : 'Текущий статус исследования.'}</p></section><section class="box"><div class="box-title"><h2>Анкета для опроса</h2></div><p class="muted">${s.questions.length ? `${s.questions.length} вопросов · ${s.response_count} ответов респондентов` : 'Создайте вопросы для интервьюеров или загрузите JSON-анкету.'}</p>${s.questions.length ? `<div style="margin-bottom:17px">${s.questions.slice(0,3).map((q,i) => `<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:12px">${i+1}. ${esc(q.label)}</div>`).join('')}${s.questions.length > 3 ? `<p class="muted">И ещё ${s.questions.length-3} вопросов</p>` : ''}</div>` : ''}<div style="display:flex;gap:8px;flex-wrap:wrap">${canManage() && s.response_count === 0 ? `<button class="btn small secondary" data-action="questions" data-id="${s.id}">${s.questions.length ? 'Редактировать' : 'Создать анкету'}</button>` : ''}${s.questions.length ? `<button class="btn small orange" data-action="survey" data-id="${s.id}">Начать опрос</button>` : ''}${canManage() && s.questions.length ? `<a class="btn small secondary" href="/api/studies/${s.id}/responses.csv">Скачать CSV ↓</a>` : ''}</div>${s.response_count ? '<p class="muted" style="margin:12px 0 0">Анкета защищена от изменений после первого ответа.</p>' : ''}</section></div></div>`;
     }
     function renderField() { const available = state.studies.filter(s => s.questions.length); return heading('Сбор данных','Полевой опрос','Просматривайте анкеты и сохраняйте ответы респондентов.', '') + (available.length ? `<div class="field-list">${available.map(s => `<div class="field-card"><span class="badge ${s.stage}">${stages[s.stage]}</span><h3>${esc(s.title)}</h3><p>${s.questions.length} вопросов${isAdmin() ? ` · ${s.response_count} анкет · ${s.refusal_count ?? 0} отказов` : ''}</p><button class="btn small orange" data-action="survey" data-id="${s.id}">Открыть анкету →</button></div>`).join('')}</div>` : empty('Нет активных анкет','Администратор или исследователь должен создать интерактивную анкету в карточке проекта.')); }
-    function renderFocus() { return heading('Работа с участниками','Фокус-группы','Встречи, гайды модератора, аудиозаписи и расшифровки в одном месте.') + (state.studies.length ? state.studies.map(s => `<section class="box report-section"><div class="box-title"><h2>${esc(s.title)}</h2>${canManage() ? `<button class="btn small secondary" data-action="new-focus" data-id="${s.id}">+ Новая группа</button>` : ''}</div><div id="focus-list-${s.id}">${state.offline ? 'Фокус-группы доступны при подключении к серверу.' : 'Загружаем встречи…'}</div></section>`).join('') : empty('Пока нет исследований','Создайте исследование, чтобы проводить фокус-группы.')); }
+    function renderFocus() { return heading('Работа с участниками','Фокус-группы','Встречи с людьми и цифровые обсуждения на основе комментариев Telegram.') + (state.studies.length ? state.studies.map(s => `<section class="box report-section"><div class="box-title"><h2>${esc(s.title)}</h2>${canManage() ? `<button class="btn small secondary" data-action="new-focus" data-id="${s.id}">+ Очная группа</button>` : ''}</div><div id="focus-list-${s.id}">${state.offline ? 'Фокус-группы доступны при подключении к серверу.' : 'Загружаем встречи…'}</div><div class="box-title" style="margin-top:22px"><h3>Цифровые группы · симуляция</h3>${canManage() ? `<button class="btn small secondary" data-action="new-digital-focus" data-id="${s.id}">+ Цифровая группа</button>` : ''}</div><div id="digital-focus-list-${s.id}">${state.offline ? 'Нужно подключение к серверу.' : 'Загружаем цифровые группы…'}</div></section>`).join('') : empty('Пока нет исследований','Создайте исследование, чтобы проводить фокус-группы.')); }
     function renderEditor() {
       if (state.offline) return heading('Методический кабинет','Редактор анкет и гайдов','Нужно подключение к серверу.') + empty('Редактор недоступен офлайн','Подключитесь к сети, чтобы сохранить черновики и получить рекомендации.');
       if (!state.studies.length) return heading('Методический кабинет','Редактор анкет и гайдов','Сначала создайте исследование.') + empty('Нет исследований','Добавьте проект во вкладке «Исследования».');
@@ -738,7 +740,7 @@
     async function handleClick(event) {
       const button = event.target.closest('[data-action]'); if (!button) return;
       const { action, id } = button.dataset; const s = study(id);
-      const permitted = isAdmin() || (state.user.role === 'researcher' && ['open','back','new-study','edit-study','questions','edit-quotas','new-focus','open-focus','link-create','link-revoke','stage','calendar-month','calendar-day','new-task','edit-task'].includes(action)) || (state.user.role === 'interviewer' && action === 'survey');
+      const permitted = isAdmin() || (state.user.role === 'researcher' && ['open','back','new-study','edit-study','questions','edit-quotas','new-focus','open-focus','new-digital-focus','open-digital-focus','link-create','link-revoke','stage','calendar-month','calendar-day','new-task','edit-task'].includes(action)) || (state.user.role === 'interviewer' && action === 'survey');
       if (!permitted) return notify('Недостаточно прав для этого действия',true);
       if (action === 'open') { state.selected = Number(id); render(); }
       if (action === 'back') { state.selected = null; state.tab = 'studies'; render(); }
@@ -750,6 +752,8 @@
       if (action === 'edit-compound' && s) editCompound(s);
       if (action === 'new-focus' && s) newFocus(s);
       if (action === 'open-focus' && s) openFocus(s, Number(button.dataset.focus));
+      if (action === 'new-digital-focus' && s) newDigitalFocus(s);
+      if (action === 'open-digital-focus' && s) openDigitalFocus(s, Number(button.dataset.focus));
       if (action === 'link-create' && s) changeSurveyLink(s, 'PUT');
       if (action === 'link-revoke' && s && confirm('Отключить ссылку? Новые ответы по ней перестанут приниматься.')) changeSurveyLink(s, 'DELETE');
       if (action === 'survey' && s) openSurvey(s);
@@ -837,6 +841,53 @@
       if (method === 'PUT' && s.questions.length === 0) return notify('Сначала создайте анкету.',true);
       if (method === 'PUT' && document.querySelector('#public-url') && !confirm('Старая ссылка перестанет работать. Продолжить?')) return;
       try { await api(`/studies/${s.id}/survey-link`,method); await loadSurveyLink(s.id); notify(method === 'PUT' ? 'Ссылка готова' : 'Ссылка отключена'); } catch (error) { notify(error.message,true); }
+    }
+    async function loadDigitalFocus(sid) {
+      const box = document.querySelector(`#digital-focus-list-${sid}`);
+      if (!box) return;
+      try {
+        const {sessions} = await api(`/studies/${sid}/digital-focus`);
+        if (!box.isConnected) return;
+        box.innerHTML = sessions.length ? sessions.map(item => `<div class="file-row"><span class="file-icon">◎</span><strong>${esc(item.title)}</strong><small>${item.participants} цифровых участников · ${item.source_count} комментариев · ${item.finished ? 'Завершена' : 'Активна'}</small><button class="btn small secondary" data-action="open-digital-focus" data-id="${sid}" data-focus="${item.id}">Открыть</button></div>`).join('') : '<p class="muted">Цифровых групп ещё нет. Сначала соберите комментарии в медиаанализе.</p>';
+      } catch (error) { if (box.isConnected) box.textContent = error.message; }
+    }
+    async function newDigitalFocus(s) {
+      try {
+        const {monitors} = await api('/media');
+        if (!monitors.length) return notify('Сначала создайте мониторинг Telegram и соберите комментарии.',true);
+        openModal('Новая цифровая фокус-группа', `<p class="muted">Это симуляция, а не ответы реальных респондентов. Для создания нужны минимум три сохранённых комментария выбранного мониторинга.</p><form id="digital-create" class="form-grid"><label class="field-label">Название<input name="title" maxlength="180" required></label><label class="field-label">Мониторинг Telegram<select name="monitor_id" required>${monitors.map(m => `<option value="${m.id}">${esc(m.question)}</option>`).join('')}</select></label><label class="field-label">Цифровых участников<input name="participants" type="number" min="2" max="5" value="3" required></label><label class="field-label">Загрузить гайд (.txt, .md)<input type="file" id="digital-guide-file" accept=".txt,.md,text/plain,text/markdown"></label><label class="field-label">Гайд модератора<textarea name="guide" maxlength="20000" required placeholder="Вопросы и темы для обсуждения"></textarea></label><button class="btn" type="submit">Создать группу</button></form>`,true);
+        const form = document.querySelector('#digital-create');
+        form.querySelector('#digital-guide-file').onchange = async event => {
+          const file = event.target.files[0]; if (!file) return;
+          if (!/\.(txt|md)$/i.test(file.name) || file.size > 100000) return notify('Нужен текстовый гайд .txt или .md до 100 КБ',true);
+          form.elements.guide.value = (await file.text()).slice(0,20000);
+        };
+        form.onsubmit = async event => {
+          event.preventDefault(); const button = form.querySelector('[type="submit"]'); button.disabled = true;
+          try {
+            const data = Object.fromEntries(new FormData(form));
+            const result = await api(`/studies/${s.id}/digital-focus`,'POST',{title:data.title,guide:data.guide,monitor_id:Number(data.monitor_id),participants:Number(data.participants)});
+            await loadDigitalFocus(s.id); await openDigitalFocus(s,result.id);
+          } catch (error) { notify(error.message,true); button.disabled = false; }
+        };
+      } catch (error) { notify(error.message,true); }
+    }
+    async function openDigitalFocus(s, id) {
+      try {
+        const {session, messages} = await api(`/studies/${s.id}/digital-focus/${id}`);
+        const base = `/studies/${s.id}/digital-focus/${id}`;
+        openModal(esc(session.title), `<p class="muted">Симулированные участники на основе ${session.monitor_id ? 'комментариев Telegram' : 'сохранённых комментариев Telegram'}. Их реплики не являются мнением реальных респондентов.</p><details><summary>Гайд модератора</summary><div class="focus-guide" style="white-space:pre-wrap">${esc(session.guide)}</div></details><div class="digital-dialog" aria-live="polite">${messages.length ? messages.map(m => `<article class="chat-message ${m.speaker === 0 ? 'own' : ''}"><header><strong>${m.speaker === 0 ? 'Модератор' : 'Цифровой участник '+m.speaker}</strong></header><p>${esc(m.body)}</p>${m.sources.length ? `<small>Основано на комментариях: ${m.sources.map(source => `<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">#${source.id}</a>`).join(', ')}</small>` : ''}</article>`).join('') : '<p class="muted">Начните с вопроса из гайда.</p>'}</div>${session.finished ? '<p class="muted">Группа завершена. Диалог сохранён.</p>' : `<form id="digital-turn" class="form-grid"><label class="field-label">Реплика модератора<textarea name="question" maxlength="2000" required placeholder="Задайте вопрос или предложите участникам обсудить ответы друг друга"></textarea></label><button class="btn" type="submit">Отправить и получить ответы</button></form><button id="digital-finish" class="btn small secondary" type="button">Завершить группу</button>`}`,true);
+        document.querySelector('.digital-dialog').scrollTop = document.querySelector('.digital-dialog').scrollHeight;
+        const form = document.querySelector('#digital-turn');
+        if (form) form.onsubmit = async event => {
+          event.preventDefault(); const question = form.elements.question.value.trim(), button = form.querySelector('button');
+          if (!question) return; button.disabled = true; button.textContent = 'Участники отвечают…';
+          try { await api(base+'/turn','POST',{question}); await openDigitalFocus(s,id); }
+          catch (error) { notify(error.message,true); button.disabled = false; button.textContent = 'Отправить и получить ответы'; }
+        };
+        const finish = document.querySelector('#digital-finish');
+        if (finish) finish.onclick = async () => { if (!confirm('Завершить цифровую группу? Новые вопросы после этого нельзя будет отправить.')) return; try { await api(base+'/finish','POST',{}); await loadDigitalFocus(s.id); await openDigitalFocus(s,id); } catch (error) { notify(error.message,true); } };
+      } catch (error) { notify(error.message,true); }
     }
     async function loadFocus(sid) {
       const box = document.querySelector(state.selected === sid ? '#focus-list' : `#focus-list-${sid}`);

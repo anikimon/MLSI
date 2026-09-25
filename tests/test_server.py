@@ -70,6 +70,52 @@ class PlannerTest(unittest.TestCase):
         workbook.close()
         return base64.b64encode(buffer.getvalue()).decode("ascii")
 
+    def test_digital_focus_group_uses_only_telegram_comments_and_preserves_dialogue(self):
+        self.assertEqual(self.request(self.admin, "/studies/1/digital-focus")[0], 401)
+        self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
+        sid = self.request(self.admin, "/studies", "POST", {"title": "Парки", "description": "", "due_date": "", "responsible_id": None})[1]["id"]
+        other = self.request(self.admin, "/studies", "POST", {"title": "Другое", "description": "", "due_date": "", "responsible_id": None})[1]["id"]
+        mid = self.request(self.admin, "/media", "POST", {"question": "Парки", "telegram_channels": ["@parks"]})[1]["id"]
+        base = f"/studies/{sid}/digital-focus"
+        form = {"title": "Обсуждение", "guide": "Что улучшить в парках?", "participants": 3, "monitor_id": mid}
+        self.assertEqual(self.request(self.admin, base, "POST", form)[0], 400)
+        with closing(sqlite3.connect(self.db_path)) as db, db:
+            for i in range(4):
+                db.execute("""INSERT INTO media_items (monitor_id, source, title, excerpt, url, published, collected_at, item_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (mid, "telegram" if i < 3 else "news", "Комментарий",
+                        f"В парке не хватает деревьев {i}", f"https://t.me/parks/1?comment={i+1}", "2026-09-20", "2026-09-20", "comment"))
+            db.execute("""INSERT INTO media_items (monitor_id, source, title, excerpt, url, published, collected_at, item_type)
+                VALUES (?, 'telegram', 'Пост', 'Новости', 'https://t.me/parks/1', '2026-09-20', '2026-09-20', 'post')""", (mid,))
+        status, created = self.request(self.admin, base, "POST", form)
+        self.assertEqual((status, created["source_count"]), (201, 3))
+        fid = created["id"]
+        self.assertEqual(self.request(self.admin, f"/studies/{other}/digital-focus/{fid}")[0], 404)
+        self.assertEqual(self.request(self.interviewer, f"{base}/{fid}")[0], 401)
+        self.assertEqual(self.request(self.admin, f"{base}/{fid}")[1]["messages"], [])
+
+        def answer(payload, key, **kwargs):
+            evidence = json.loads(payload["messages"][1]["content"])["evidence"]
+            self.assertTrue(all("деревьев" in row["text"] for row in evidence))
+            self.assertIn("реагируют на реплики", payload["messages"][0]["content"])
+            return json.dumps({"replies": [{"speaker": i, "text": f"Участник {i} отвечает предыдущему",
+                "source_ids": [evidence[i-1]["id"]]} for i in range(1, 4)]})
+
+        with patch("server.deepseek_key", return_value="test"), patch("server.deepseek_answer", side_effect=answer):
+            self.assertEqual(self.request(self.admin, f"{base}/{fid}/turn", "POST", {"question": "Что с деревьями?"})[0], 200)
+        messages = self.request(self.admin, f"{base}/{fid}")[1]["messages"]
+        self.assertEqual([item["speaker"] for item in messages], [0, 1, 2, 3])
+        self.assertEqual(len(messages[2]["sources"]), 1)
+        self.assertTrue(messages[2]["sources"][0]["url"].startswith("https://t.me/"))
+        with patch("server.deepseek_key", return_value="test"), patch("server.deepseek_answer", return_value='{"replies":[]}'):
+            self.assertEqual(self.request(self.admin, f"{base}/{fid}/turn", "POST", {"question": "Повтор"})[0], 502)
+        self.assertEqual(len(self.request(self.admin, f"{base}/{fid}")[1]["messages"]), 4)
+        self.assertEqual(self.request(self.admin, f"{base}/{fid}/finish", "POST", {})[0], 200)
+        self.assertEqual(self.request(self.admin, f"{base}/{fid}/turn", "POST", {"question": "Ещё вопрос"})[0], 409)
+        self.assertEqual(self.request(self.admin, f"/media/{mid}", "DELETE")[0], 200)
+        self.assertEqual(len(self.request(self.admin, f"{base}/{fid}")[1]["messages"]), 4)
+        self.assertEqual(self.request(self.admin, f"/studies/{sid}", "DELETE")[0], 200)
+
+
     def test_telegram_media_monitor_collects_deduplicates_exports_and_enforces_roles(self):
         self.assertEqual(self.request(self.admin, "/media")[0], 401)
         self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})

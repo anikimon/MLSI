@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
+from digital_focus import make_turn_payload, parse_replies, retrieve
 from media_monitor import (AGENTS, collect as collect_media, summarize as summarize_media,
                            telegram_search, telegram_start_auth, telegram_status, telegram_subscribe,
                            telegram_verify)
@@ -40,6 +41,7 @@ MAX_FILE = 5 * 1024 * 1024
 MAX_AUDIO = 24 * 1024 * 1024
 ASR_LOCK = threading.Lock()
 ASR_MODEL = None
+DIGITAL_FOCUS_LOCK = threading.Lock()
 
 
 def transcribe_audio(content, suffix):
@@ -219,6 +221,22 @@ def init_db(path):
                 UNIQUE(monitor_id, url)
             );
             CREATE INDEX IF NOT EXISTS media_items_recent ON media_items(monitor_id, id DESC);
+            CREATE TABLE IF NOT EXISTS digital_focus_sessions (
+                id INTEGER PRIMARY KEY, study_id INTEGER NOT NULL REFERENCES studies(id),
+                monitor_id INTEGER REFERENCES media_monitors(id) ON DELETE SET NULL,
+                title TEXT NOT NULL, guide TEXT NOT NULL, participants INTEGER NOT NULL,
+                finished INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS digital_focus_sources (
+                id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES digital_focus_sessions(id) ON DELETE CASCADE,
+                url TEXT NOT NULL, body TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS digital_focus_messages (
+                id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES digital_focus_sessions(id) ON DELETE CASCADE,
+                speaker INTEGER NOT NULL, body TEXT NOT NULL, source_ids TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS digital_focus_messages_recent ON digital_focus_messages(session_id, id);
             """)
             monitor_columns = {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}
             if "region" not in monitor_columns:
@@ -854,11 +872,14 @@ class Handler(BaseHTTPRequestHandler):
             answer = deepseek_answer(payload, key)
             self.send_json(200, {"answer": answer[:10000]})
             return
-        match = re.fullmatch(r"/api/studies/(\d+)(?:/(files|questionnaire|responses.csv|responses|refusals|weighting|quotas|members|member-quotas|survey-link|focus|messages|associations|import|report|report.pdf|analytical-report|analytical-report.pdf|presentation|presentation.pptx|presentation-template)(?:/(\d+)(?:/(audio|transcribe|transcript|guide))?)?)?", path)
+        match = re.fullmatch(r"/api/studies/(\d+)(?:/(files|questionnaire|responses.csv|responses|refusals|weighting|quotas|members|member-quotas|survey-link|focus|digital-focus|messages|associations|import|report|report.pdf|analytical-report|analytical-report.pdf|presentation|presentation.pptx|presentation-template)(?:/(\d+)(?:/(audio|transcribe|transcript|guide|turn|finish))?)?)?", path)
         if not match:
             raise ApiError(404, "Адрес не найден")
         study_id, action, file_id, subaction = int(match[1]), match[2], match[3], match[4]
         study_exists(db, study_id)
+        if action == "digital-focus":
+            self.digital_focus_route(db, study_id, file_id, subaction, method)
+            return
         if action == "members":
             if method == "PUT":
                 self.require(db, {"admin"})
@@ -1011,9 +1032,11 @@ class Handler(BaseHTTPRequestHandler):
             if db.execute("SELECT 1 FROM demo_study WHERE study_id = ?", (study_id,)).fetchone():
                 raise ApiError(409, "Демонстрационное исследование сохраняется для проверки функций приложения")
             db.execute("UPDATE calendar_tasks SET study_id = NULL WHERE study_id = ?", (study_id,))
+            db.execute("DELETE FROM digital_focus_messages WHERE session_id IN (SELECT id FROM digital_focus_sessions WHERE study_id = ?)", (study_id,))
+            db.execute("DELETE FROM digital_focus_sources WHERE session_id IN (SELECT id FROM digital_focus_sessions WHERE study_id = ?)", (study_id,))
             for table in ("files", "questionnaires", "responses", "refusals", "weighting", "submissions",
                           "study_messages", "study_quotas", "study_associations", "study_members", "member_quotas",
-                           "public_links", "focus_sessions", "editor_drafts", "analytical_reports", "presentations", "presentation_templates"):
+                           "public_links", "focus_sessions", "digital_focus_sessions", "editor_drafts", "analytical_reports", "presentations", "presentation_templates"):
                 db.execute(f"DELETE FROM {table} WHERE study_id = ?", (study_id,))
             db.execute("DELETE FROM studies WHERE id = ?", (study_id,))
             self.send_json(200, {"ok": True})
@@ -1526,6 +1549,86 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"channels": result})
             return
         raise ApiError(404, "Telegram endpoint не найден")
+
+    def digital_focus_route(self, db, study_id, session_id, action, method):
+        self.require(db, {"admin", "researcher"})
+        if session_id is None:
+            if method == "GET":
+                sessions = [dict(row) for row in db.execute("""SELECT s.*, COUNT(DISTINCT src.id) AS source_count
+                    FROM digital_focus_sessions s LEFT JOIN digital_focus_sources src ON src.session_id = s.id
+                    WHERE s.study_id = ? GROUP BY s.id ORDER BY s.id DESC""", (study_id,))]
+                self.send_json(200, {"sessions": sessions})
+                return
+            if method == "POST":
+                data = self.read_json()
+                title = clean_text(data.get("title", ""), 180, True)
+                guide = clean_text(data.get("guide", ""), 20000, True)
+                monitor_id, participants = data.get("monitor_id"), data.get("participants", 3)
+                if type(monitor_id) is not int or type(participants) is not int or not 2 <= participants <= 5:
+                    raise ApiError(400, "Выберите мониторинг и от 2 до 5 цифровых участников")
+                if not db.execute("SELECT 1 FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone():
+                    raise ApiError(404, "Мониторинг не найден")
+                sources = db.execute("""SELECT url, title, excerpt FROM media_items WHERE monitor_id = ?
+                    AND source = 'telegram' AND item_type = 'comment' ORDER BY id DESC LIMIT 2000""", (monitor_id,)).fetchall()
+                sources = [(row["url"], (row["excerpt"] or row["title"]).strip()[:1200]) for row in sources
+                           if re.match(r"^https://t\.me/[A-Za-z0-9_]+/\d+\?comment=\d+$", row["url"]) and (row["excerpt"] or row["title"]).strip()]
+                if len(sources) < 3:
+                    raise ApiError(400, "В мониторинге пока меньше трёх доступных Telegram-комментариев")
+                cursor = db.execute("""INSERT INTO digital_focus_sessions
+                    (study_id, monitor_id, title, guide, participants, created_at) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (study_id, monitor_id, title, guide, participants, now()))
+                db.executemany("INSERT INTO digital_focus_sources (session_id, url, body) VALUES (?, ?, ?)",
+                               [(cursor.lastrowid, url, body) for url, body in sources])
+                self.send_json(201, {"id": cursor.lastrowid, "source_count": len(sources)})
+                return
+            raise ApiError(405, "Метод не поддерживается")
+        session_id = int(session_id)
+        session = db.execute("SELECT * FROM digital_focus_sessions WHERE id = ? AND study_id = ?",
+                             (session_id, study_id)).fetchone()
+        if not session:
+            raise ApiError(404, "Цифровая группа не найдена")
+        if method == "GET" and action is None:
+            messages = [dict(row) for row in db.execute("SELECT * FROM digital_focus_messages WHERE session_id = ? ORDER BY id",
+                                                        (session_id,))]
+            cited = {source_id for row in messages for source_id in json.loads(row["source_ids"])}
+            sources = {row["id"]: row["url"] for row in db.execute("SELECT id, url FROM digital_focus_sources WHERE session_id = ?", (session_id,)) if row["id"] in cited}
+            for row in messages:
+                row["sources"] = [{"id": i, "url": sources[i]} for i in json.loads(row.pop("source_ids")) if i in sources]
+            self.send_json(200, {"session": dict(session), "messages": messages})
+            return
+        if method == "POST" and action == "finish":
+            self.read_json()
+            with DIGITAL_FOCUS_LOCK:
+                db.execute("UPDATE digital_focus_sessions SET finished = 1 WHERE id = ?", (session_id,))
+            self.send_json(200, {"ok": True})
+            return
+        if method == "POST" and action == "turn":
+            question = clean_text(self.read_json().get("question", ""), 2000, True)
+            if not DIGITAL_FOCUS_LOCK.acquire(blocking=False):
+                raise ApiError(409, "Другая цифровая группа сейчас формирует ответ")
+            try:
+                if db.execute("SELECT finished FROM digital_focus_sessions WHERE id = ?", (session_id,)).fetchone()[0]:
+                    raise ApiError(409, "Цифровая группа завершена")
+                history = [dict(row) for row in db.execute("""SELECT speaker, body FROM digital_focus_messages
+                    WHERE session_id = ? ORDER BY id DESC LIMIT 12""", (session_id,))][::-1]
+                sources = [dict(row) for row in db.execute("SELECT id, body FROM digital_focus_sources WHERE session_id = ?", (session_id,))]
+                evidence = retrieve(sources, question, session["guide"], history)
+                payload = make_turn_payload(session["guide"], session["participants"], history, question, evidence)
+                raw = deepseek_answer(payload, deepseek_key(), timeout=90)
+                try:
+                    replies = parse_replies(raw, session["participants"], evidence)
+                except ValueError as exc:
+                    raise ApiError(502, str(exc)) from exc
+                stamp = now()
+                db.execute("INSERT INTO digital_focus_messages (session_id, speaker, body, created_at) VALUES (?, 0, ?, ?)",
+                           (session_id, question, stamp))
+                db.executemany("""INSERT INTO digital_focus_messages (session_id, speaker, body, source_ids, created_at)
+                    VALUES (?, ?, ?, ?, ?)""", [(session_id, speaker, text, json.dumps(ids), stamp) for speaker, text, ids in replies])
+                self.send_json(200, {"ok": True})
+                return
+            finally:
+                DIGITAL_FOCUS_LOCK.release()
+        raise ApiError(405, "Метод не поддерживается")
 
     @staticmethod
     def telegram_channels(data):
