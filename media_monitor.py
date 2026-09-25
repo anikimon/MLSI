@@ -96,7 +96,8 @@ def vk_agent(question, region="", group_links=()):
     seen_groups = set()
     for link in group_links or ():
         path = urllib.parse.urlsplit(str(link)).path.strip("/")
-        match = re.fullmatch(r"(?:club|public|group)(\d+)", path, re.I)
+        path = re.sub(r"^(?:club|public|group)/?", "", path, flags=re.I)
+        match = re.fullmatch(r"(\d+)", path)
         if match:
             group_id = int(match.group(1))
             if group_id not in seen_groups:

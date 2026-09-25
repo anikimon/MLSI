@@ -1490,7 +1490,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(raw_links, str):
                     raise ApiError(400, "Ссылки на группы должны быть текстом")
                 group_links = [link.strip() for link in raw_links.splitlines() if link.strip()]
-                if any(not re.fullmatch(r"https?://(?:www\.)?vk\.com/(?:club|public|group)?[A-Za-z0-9_.-]+/?", link, re.I) for link in group_links):
+                if any(not re.fullmatch(r"https?://(?:www\.)?(?:vk\.com|vk\.ru)/(?:club|public|group)?/?[A-Za-z0-9_.-]+/?(?:\?[A-Za-z0-9_.=&%-]+)?", link, re.I) for link in group_links):
                     raise ApiError(400, "Укажите корректные ссылки на группы VK, по одной на строку")
                 hashtag = data.get("hashtag", "")
                 if not isinstance(hashtag, str) or not re.fullmatch(r"#?[\wа-яА-ЯёЁ]{0,60}", hashtag):

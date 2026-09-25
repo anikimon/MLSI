@@ -109,6 +109,26 @@ class SummaryTest(unittest.TestCase):
         wall_call = next(call for call in calls if call[0] == "wall.get")
         self.assertEqual(wall_call[1]["owner_id"], -123)
 
+    def test_vk_manual_group_links_accept_vk_ru_and_prefixed_slugs(self):
+        calls = []
+
+        def fake_api(method, params):
+            calls.append((method, params))
+            if method == "groups.search":
+                return {"items": []}
+            if method == "groups.getById":
+                return {"groups": [{"id": 456, "screen_name": "example", "name": "Example"}]}
+            if method == "wall.get":
+                return {"items": []}
+            if method == "wall.search":
+                return {"items": []}
+            raise AssertionError(method)
+
+        with patch("media_monitor.vk_api", side_effect=fake_api):
+            vk_agent("события", "регион", ["https://vk.ru/public/example?from=groups"])
+
+        self.assertIn(("groups.getById", {"group_ids": "example"}), calls)
+
 
 if __name__ == "__main__":
     unittest.main()
