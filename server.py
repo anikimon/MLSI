@@ -505,6 +505,19 @@ class Handler(BaseHTTPRequestHandler):
     def handle_request(self):
         path = urlsplit(self.path).path
         try:
+            # The custom Render domain must always use HTTPS. Without this
+            # redirect a Secure session cookie is rejected by the browser
+            # when the user opens http://mlsilab.ru.
+            host = self.headers.get("Host", "").split(":", 1)[0].lower()
+            forwarded_proto = self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
+            if host in {"mlsilab.ru", "www.mlsilab.ru"} and forwarded_proto != "https":
+                location = f"https://mlsilab.ru{self.path}"
+                self.send_response(301)
+                self.send_header("Location", location)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if self.command == "GET" and (path in ("/", "/index.html") or re.fullmatch(r"/s/[A-Za-z0-9_-]{32,80}", path)):
                 self.send_bytes(200, (ROOT / "index.html").read_bytes(), "text/html; charset=utf-8")
                 return
