@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Проректор по молодёжке — 30 дней</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:#0e1030;color:#eef2ff;font-family:"Courier New",monospace;display:flex;justify-content:center;overflow:hidden}
+#phone{width:100%;max-width:430px;height:100dvh;display:flex;flex-direction:column;background:linear-gradient(#1c2a5e,#10122b);border-left:3px solid #000;border-right:3px solid #000}
+.hud{display:flex;gap:6px;padding:8px 8px 4px;font-size:11px}
+.hud div{flex:1;background:#1b2148;border:2px solid #000;text-align:center;padding:4px 2px}
+.hud b{display:block;font-size:15px;color:#ffd166}
+#cond{margin:0 8px;background:#242c5c;border:2px solid #000;font-size:11px;padding:4px 6px;min-height:26px;text-align:center;color:#4dd8e6}
+#scene{margin:4px 8px 0;border:3px solid #000;background:#000}
+#scene canvas{width:100%;height:auto;display:block;image-rendering:pixelated}
+#card{flex:1;margin:6px 8px;background:#f4f0e1;color:#2a2418;border:3px solid #000;padding:8px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+#cardType{font-size:10px;background:#000;color:#ffd166;display:inline-block;padding:2px 6px;letter-spacing:1px}
+#cardFrom{font-size:11px;color:#6a6146;margin-top:4px}
+#cardBody{font-size:13px;line-height:1.35;margin-top:6px;overflow:auto;flex:1}
+#team{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px;margin:0 8px;font-size:9px}
+.unit{background:#1b2148;border:2px solid #000;padding:3px;text-align:center}
+.unit b{font-size:9px;display:block;white-space:nowrap;overflow:hidden}
+.bar{height:6px;background:#000;margin-top:2px}
+.bar i{display:block;height:100%;background:#3ad46b}
+.unit.burn .bar i{background:#ff5f6d}
+.unit.gone{opacity:.4}
+#actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px 8px 8px}
+#actions.order{grid-template-columns:1fr 1fr}
+button{font-family:inherit;font-weight:700;border:3px solid #000;box-shadow:0 3px 0 #000;padding:10px 4px;font-size:12px;cursor:pointer}
+button:active{transform:translateY(3px);box-shadow:none}
+.green{background:#3ad46b}.red{background:#ff5f6d}.amber{background:#ffd166}.blue{background:#4dd8e6}.ghost{background:#242c5c;color:#fff;font-size:10px}
+button:disabled{opacity:.4}
+.screen{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;background:rgba(5,7,20,.92);z-index:10;padding:16px}
+.box{max-width:400px;background:#1b2148;border:4px solid #000;padding:18px;text-align:center}
+.box h1{color:#ffd166;font-size:26px;letter-spacing:2px}
+.box p{font-size:12px;margin:8px 0;color:#dbe2ff}
+.hidden{display:none!important}
+#toast{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);background:#000;border:2px solid #ffd166;color:#fff;font-size:12px;padding:6px 12px;z-index:20}
+</style>
+</head>
+<body>
+<div id="phone">
+  <div class="hud">
+    <div>ДЕНЬ<b id="hDay">1/30</b></div>
+    <div>ПИСЬМА<b id="hMail">0/12</b></div>
+    <div>ВЫГОВОР<b id="hRep">0/4</b></div>
+    <div>СЧЁТ<b id="hScore">0</b></div>
+  </div>
+  <div id="cond">…</div>
+  <div id="scene"><canvas id="cv" width="160" height="90"></canvas></div>
+  <div id="card"><div><span id="cardType">…</span><div id="cardFrom"></div></div><div id="cardBody"></div></div>
+  <div id="team"></div>
+  <div id="actions"></div>
+</div>
+<div id="start" class="screen"><div class="box">
+  <h1>ПРОРЕКТОР</h1>
+  <p><b>Молодёжная политика · Указ №809</b></p>
+  <p style="text-align:left">📄 Документы: соответствует указу → <b>Одобрить</b>, нет → <b>В утиль</b>.<br>📊 Презентации: дизайн ок → <b>Одобрить</b>, нет → <b>На переделку</b>.<br>📨 Поручения ректора/проректора: <b>сделай сам</b> (100%) или <b>делегируй</b> (старт 75%, падает от нагрузки, при выгорании 10%).<br>🔥 Сотрудники выгорают и могут уволиться.<br>⛔ &gt;3 выговоров в день = увольнение.<br>🎯 Продержись <b>30 дней × 12 писем</b>.</p>
+  <button class="amber" id="btnStart" style="width:100%;font-size:16px">НАЧАТЬ СМЕНУ</button>
+</div></div>
+<div id="over" class="screen hidden"><div class="box">
+  <h1 id="overTitle">ФИНАЛ</h1>
+  <p id="overText"></p>
+  <button class="amber" id="btnRestart" style="width:100%">ЕЩЁ РАЗ</button>
+</div></div>
+<div id="toast" class="hidden"></div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');ctx.imageSmoothingEnabled=false;
+function $(id){return document.getElementById(id);}
+function rnd(n){return Math.floor(Math.random()*n);}
+function pick(a){return a[rnd(a.length)];}
+function toast(t){var e=$('toast');e.textContent=t;e.classList.remove('hidden');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.add('hidden');},1800);}
+
+var UNITS=[
+ {id:'psy',name:'Псих.служба',burnout:0,load:0,gone:false},
+ {id:'dvr',name:'Деп.воспит.',burnout:0,load:0,gone:false},
+ {id:'soc',name:'Социолаб.',burnout:0,load:0,gone:false},
+ {id:'comp',name:'Компетенц.',burnout:0,load:0,gone:false}
+];
+var CONDS=[
+ {n:'Обычный день',d:'без эффектов',fx:{}},
+ {n:'Проверка министерства',d:'ошибка = +2 выговора!',fx:{strict:true}},
+ {n:'День мотивации',d:'делегирование +10%',fx:{motivate:true}},
+ {n:'Усталость команды',d:'выгорание +15 всем',fx:{tired:true}},
+ {n:'Поток поручений',d:'поручений больше',fx:{orders:true}},
+ {n:'Вдохновение',d:'выгорание -10',fx:{fresh:true}}
+];
+var SENDERS=['Минобрнауки','Минкультуры','Минпросвещения','Росмолодёжь','Департамент молодёжки','НКО «Вектор»','Фонд «Диалог»','Вуз-партнёр'];
+var GOOD_DOCS=['Фестиваль «Семейные традиции»: патриотизм, наставничество, история Отечества.','Программа «Герои рядом»: встречи с ветеранами, волонтёрство, крепкая семья.','Проект «Корни»: духовно-нравственные ценности, уважение к старшим, любовь к Родине.','Лагерь «Патриот»: гимн, флаг, история, труд и взаимопомощь.','Конкурс «Моя семья — моя опора»: поддержка материнства и детства.','Акция «Память»: уход за мемориалами, уроки истории.'];
+var BAD_DOCS=['Фестиваль «Будь собой»: отказ от семьи и патриотизма, культ эгоизма и потребления.','Лекция «Забудь историю»: история России — сплошные ошибки, гордиться нечем.','Проект «Свобода от всех»: отрицание брака, детей и служения Отечеству.','Марафон «Никому не должен»: индивидуализм выше коллектива и Родины.','Клуб «Перепишем прошлое»: искажение подвига народа, высмеивание традиций.','Гайд «Живи для себя»: чайлдфри, презрение к семейным ценностям.'];
+var GOOD_PRES=['Титул ВУЗ, 3 цвета, крупный кегль, фото студентов-волонтёров.','Строгая сетка, бренд университета, читаемые графики.','Минимализм: белый фон, синий акцент, 5 слайдов по делу.'];
+var BAD_PRES=['20 шрифтов, Comic Sans, кислотный фон, текст не читается.','7 цветов неоновых, анимации на каждом слайде, каша из картинок.','Мелкий текст 8pt, тёмное на тёмном, логотип растянут.'];
+var ORDERS=['Срочно подготовь отчёт для ректората к утру.','Организуй встречу студентов с ветеранами завтра.','Проверь общежития и доложи проректору по учебе.','Ректор просит презентацию к совещанию через час.','Согласуй план воспитательной работы с учебным блоком.','Разбери жалобы студентов из ящика ректора.'];
+
+var S={day:1,idx:0,items:[],cond:CONDS[0],dailyRep:0,totalRep:0,score:0,done:false};
+
+function prob(u){
+ if(u.gone)return 0;
+ if(u.burnout>=100)return 10;
+ var p=75-u.load*4-u.burnout*0.2;
+ if(S.cond.fx.motivate)p+=10;
+ return Math.max(5,Math.min(95,Math.round(p)));
+}
+function genDay(){
+ var c=pick(CONDS);S.cond=c;
+ if(c.fx.tired)UNITS.forEach(function(u){u.burnout=Math.min(100,u.burnout+15);});
+ if(c.fx.fresh)UNITS.forEach(function(u){u.burnout=Math.max(0,u.burnout-10);});
+ var nOrders=c.fx.orders?5:3,items=[],o=0;
+ for(var i=0;i<12;i++){
+  var r=Math.random(),type;
+  if(o<nOrders&&(r<0.3||i>=12-(nOrders-o))){type='order';o++;}
+  else type=Math.random()<0.55?'doc':'pres';
+  if(type==='doc'){var bad=Math.random()<0.45;items.push({type:'doc',from:pick(SENDERS),bad:bad,body:bad?pick(BAD_DOCS):pick(GOOD_DOCS)});}
+  else if(type==='pres'){var b2=Math.random()<0.5;items.push({type:'pres',from:pick(SENDERS),bad:b2,body:(b2?'❌ Дизайн: ':'✅ Дизайн: ')+(b2?pick(BAD_PRES):pick(GOOD_PRES))});}
+  else{items.push({type:'order',from:pick(['Ректор','Проректор по учебной работе']),body:pick(ORDERS)});}
+ }
+ // перемешать, но поручения равномерно
+ S.items=items;S.idx=0;S.dailyRep=0;
+}
+function draw(){
+ var x=0;
+ ctx.fillStyle='#26406b';ctx.fillRect(0,0,160,90);
+ ctx.fillStyle='#7ec0ee';ctx.fillRect(110,6,42,26);
+ ctx.fillStyle='#5a3d1f';ctx.fillRect(110,6,42,3);ctx.fillRect(110,29,42,3);ctx.fillRect(110,6,3,26);ctx.fillRect(149,6,3,26);
+ ctx.fillStyle='#f4f0e1';ctx.fillRect(8,6,44,26);
+ ctx.fillStyle='#c0392b';ctx.fillRect(11,9,20,4);
+ ctx.fillStyle='#8a94b5';for(var i=0;i<4;i++)ctx.fillRect(11,16+i*4,38,2);
+ // стол от первого лица
+ ctx.fillStyle='#6b4a2f';ctx.fillRect(0,62,160,28);
+ ctx.fillStyle='#b5793a';ctx.fillRect(0,58,160,8);
+ // стопка входящих
+ var left=S.items.length-S.idx,layers=Math.min(8,Math.max(1,Math.ceil(left/2)));
+ for(var j=0;j<layers;j++){ctx.fillStyle=j%2?'#f4f0e1':'#ded8c4';ctx.fillRect(116,56-j*3,34,3);}
+ // руки
+ ctx.fillStyle='#e8b98a';ctx.fillRect(30,74,26,14);ctx.fillRect(104,74,26,14);
+ ctx.fillStyle='#2b3a67';ctx.fillRect(26,82,30,8);ctx.fillRect(104,82,30,8);
+ // текущий конверт
+ ctx.fillStyle='#fff';ctx.fillRect(62,50,36,12);
+ ctx.fillStyle='#c0392b';ctx.fillRect(62,50,36,3);
+ // настроение по выговорам
+ ctx.fillStyle=S.dailyRep>=2?'#ff5f6d':'#3ad46b';ctx.fillRect(0,0,160,3);
+}
+function renderTeam(){
+ var t=$('team');t.innerHTML='';
+ UNITS.forEach(function(u){
+  var d=document.createElement('div');d.className='unit'+(u.burnout>=100?' burn':'')+(u.gone?' gone':'');
+  var p=prob(u);
+  d.innerHTML='<b>'+u.name+'</b><div>'+(u.gone?'УШЁЛ':p+'%')+'</div><div class="bar"><i style="width:'+Math.min(100,u.burnout)+'%"></i></div>';
+  t.appendChild(d);
+ });
+}
+function render(){
+ $('hDay').textContent=S.day+'/30';
+ $('hMail').textContent=S.idx+'/12';
+ $('hRep').textContent=S.dailyRep+'/4';
+ $('hScore').textContent=S.score;
+ $('cond').textContent='День '+S.day+': '+S.cond.n+' — '+S.cond.d;
+ renderTeam();draw();
+ var it=S.items[S.idx],A=$('actions');A.innerHTML='';A.className='';
+ if(!it){nextDay();return;}
+ var tp=$('cardType'),fr=$('cardFrom'),bo=$('cardBody');
+ if(it.type==='doc'){tp.textContent='📄 ДОКУМЕНТ · Указ 809';fr.textContent=it.from;bo.textContent=it.body;
+  A.innerHTML='';
+  var b1=document.createElement('button');b1.className='green';b1.textContent='ОДОБРИТЬ';
+  var b2=document.createElement('button');b2.className='red';b2.textContent='В УТИЛЬ';
+  b1.onclick=function(){decideDoc(true);};b2.onclick=function(){decideDoc(false);};
+  A.appendChild(b1);A.appendChild(b2);
+ }else if(it.type==='pres'){tp.textContent='📊 ПРЕЗЕНТАЦИЯ';fr.textContent=it.from;bo.textContent=it.body;
+  var c1=document.createElement('button');c1.className='green';c1.textContent='ОДОБРИТЬ';
+  var c2=document.createElement('button');c2.className='amber';c2.textContent='НА ПЕРЕДЕЛКУ';
+  c1.onclick=function(){decidePres(true);};c2.onclick=function(){decidePres(false);};
+  A.appendChild(c1);A.appendChild(c2);
+ }else{tp.textContent='📨 ПОРУЧЕНИЕ';fr.textContent=it.from;bo.textContent=it.body;
+  A.classList.add('order');
+  var s=document.createElement('button');s.className='blue';s.textContent='СДЕЛАЮ САМ';s.style.gridColumn='1/3';
+  s.onclick=decideSelf;A.appendChild(s);
+  UNITS.forEach(function(u){
+   var b=document.createElement('button');b.className='ghost';b.disabled=u.gone;
+   b.textContent=u.name+' '+(u.gone?'—':'· '+prob(u)+'%');
+   b.onclick=function(){decideDelegate(u);};A.appendChild(b);
+  });
+ }
+}
+function reprimand(n,why){
+ var add=(S.cond.fx.strict?n*2:n);
+ S.dailyRep+=add;S.totalRep+=add;
+ toast('Выговор +'+add+': '+why);
+ if(S.dailyRep>3){gameOver(false,'Выговоров за день: '+S.dailyRep+'. Тебя уволили на '+S.day+'-й день.');return true;}
+ return false;
+}
+function advance(){
+ S.idx++;S.score+=10;
+ if(S.idx>=12){nextDay();return;}
+ render();
+}
+function decideDoc(ok){
+ var it=S.items[S.idx],needTrash=it.bad,good=(ok===(!needTrash));
+ if(good){S.score+=20;toast(needTrash?'В утиль верно ✓':'Соответствует ✓');advance();}
+ else{if(reprimand(1,needTrash?'пропустил анти-809!':'снёс хороший документ!'))return;render();}
+}
+function decidePres(ok){
+ var it=S.items[S.idx],good=(ok===(!it.bad));
+ if(good){S.score+=15;toast(ok?'Дизайн принят ✓':'На переделку ✓');advance();}
+ else{if(reprimand(1,'ошибка в презентации'))return;render();}
+}
+function decideSelf(){
+ toast('Сделал сам ✓');S.score+=15;advance();
+}
+function decideDelegate(u){
+ if(u.gone){toast('Сотрудник ушёл!');return;}
+ u.load++;u.burnout=Math.min(100,u.burnout+12+u.load*2);
+ var p=prob(u),roll=Math.random()*100;
+ // попытка увольнения при выгорании
+ if(u.burnout>=100&&Math.random()<0.2){
+  if(!confirm(u.name+': «Я выгорел и увольняюсь!» Уговорить остаться? (ОК — уговорить 50%)')){u.gone=true;toast(u.name+' уволился!');if(reprimand(1,'поручение сорвано'))return;render();return;}
+  if(Math.random()<0.5){u.burnout=70;u.load=0;toast('Остался, выгорание 70');}else{u.gone=true;toast('Всё равно ушёл!');if(reprimand(1,'поручение сорвано'))return;render();return;}
+ }
+ if(roll<p){S.score+=15;toast(u.name+': выполнено '+Math.round(p)+'% ✓');advance();}
+ else{if(reprimand(1,u.name+' провалил ('+Math.round(p)+'%)'))return;render();}
+}
+function nextDay(){
+ // отдых
+ UNITS.forEach(function(u){if(!u.gone){u.burnout=Math.max(0,u.burnout-12);if(S.day%3===0)u.load=0;}});
+ if(S.day>=30){gameOver(true,'Ты продержался 30 дней! Счёт '+S.score+', выговоров всего '+S.totalRep+'.');return;}
+ S.day++;genDay();render();
+ toast('День '+S.day+': '+S.cond.n);
+}
+function gameOver(win,text){
+ S.done=true;
+ $('overTitle').textContent=win?'ПОБЕДА 🏆':'УВОЛЕН ❌';
+ $('overText').textContent=text;
+ $('over').classList.remove('hidden');
+}
+$('btnStart').onclick=function(){$('start').classList.add('hidden');S.day=1;UNITS.forEach(function(u){u.burnout=0;u.load=0;u.gone=false;});S.score=0;S.totalRep=0;genDay();render();};
+$('btnRestart').onclick=function(){$('over').classList.add('hidden');$('start').classList.remove('hidden');};
+genDay();render();
+})();
+</script>
+</body>
+</html>
