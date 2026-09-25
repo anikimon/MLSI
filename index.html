@@ -226,6 +226,8 @@
     .focus-pane[hidden] { display:none; }
     .digital-dialog { max-height:45vh; overflow:auto; margin:16px 0; padding:12px; border:1px solid var(--line); border-radius:10px; }
     .digital-dialog .chat-message { margin-bottom:12px; }
+    .digital-persona { margin:12px 0; padding:12px; border:1px solid var(--line); border-radius:10px; }
+    .digital-persona textarea { min-height:75px; }
     #focus-guide-stop[hidden] { display:none; }
     .editor-layout { display:grid; grid-template-columns:minmax(0,2.4fr) minmax(285px,1fr); gap:18px; align-items:start; }
     .editor-toolbar { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:17px; }
@@ -855,8 +857,28 @@
       try {
         const {monitors} = await api('/media');
         if (!monitors.length) return notify('Сначала создайте мониторинг Telegram и соберите комментарии.',true);
-        openModal('Новая цифровая фокус-группа', `<p class="muted">Это симуляция, а не ответы реальных респондентов. Для создания нужны минимум три сохранённых комментария выбранного мониторинга.</p><form id="digital-create" class="form-grid"><label class="field-label">Название<input name="title" maxlength="180" required></label><label class="field-label">Мониторинг Telegram<select name="monitor_id" required>${monitors.map(m => `<option value="${m.id}">${esc(m.question)}</option>`).join('')}</select></label><label class="field-label">Цифровых участников<input name="participants" type="number" min="2" max="5" value="3" required></label><label class="field-label">Загрузить гайд (.txt, .md)<input type="file" id="digital-guide-file" accept=".txt,.md,text/plain,text/markdown"></label><label class="field-label">Гайд модератора<textarea name="guide" maxlength="20000" required placeholder="Вопросы и темы для обсуждения"></textarea></label><button class="btn" type="submit">Создать группу</button></form>`,true);
+        openModal('Новая цифровая фокус-группа', `<p class="muted">Это симуляция, а не ответы реальных респондентов. Для создания нужны минимум три комментария выбранного мониторинга.</p><form id="digital-create" class="form-grid"><label class="field-label">Название<input name="title" maxlength="180" required></label><label class="field-label">Мониторинг Telegram<select name="monitor_id" required>${monitors.map(m => `<option value="${m.id}">${esc(m.question)}</option>`).join('')}</select></label><label class="field-label">Цифровых участников<input name="participants" type="number" min="2" max="12" value="3" required></label><label class="field-label">Загрузить гайд (.txt, .md)<input type="file" id="digital-guide-file" accept=".txt,.md,text/plain,text/markdown"></label><label class="field-label">Гайд модератора<textarea name="guide" maxlength="20000" required placeholder="Вопросы и темы для обсуждения"></textarea></label><div><button class="btn small secondary" type="button" id="digital-suggest">Предложить типажи по комментариям</button><p class="muted">ИИ предложит позиции на основе комментариев. Названия и промты можно отредактировать.</p></div><div id="digital-personas"></div><button class="btn" type="submit">Создать группу</button></form>`,true);
         const form = document.querySelector('#digital-create');
+        const profiles = form.querySelector('#digital-personas');
+        const currentPersonas = () => [...profiles.querySelectorAll('[data-persona]')].map(card => ({name:card.querySelector('[data-name]').value.trim(),prompt:card.querySelector('[data-prompt]').value.trim()}));
+        const showPersonas = proposed => {
+          const count = Math.max(2,Math.min(12,Number(form.elements.participants.value) || 3));
+          const personas = proposed || currentPersonas();
+          profiles.innerHTML = `<strong>Типажи и промты участников</strong>${Array.from({length:count},(_,i) => `<div class="digital-persona" data-persona="${i}"><label class="field-label">Участник ${i+1} · название позиции<input data-name maxlength="80" required value="${esc(personas[i]?.name || 'Участник '+(i+1))}"></label><label class="field-label">Индивидуальный промт<textarea data-prompt maxlength="700" placeholder="Позиция, интересы и возможные возражения">${esc(personas[i]?.prompt || '')}</textarea></label></div>`).join('')}`;
+        };
+        showPersonas([]);
+        form.elements.participants.onchange = () => showPersonas();
+        form.elements.monitor_id.onchange = () => showPersonas([]);
+        form.querySelector('#digital-suggest').onclick = async event => {
+          const button = event.currentTarget, monitorId = Number(form.elements.monitor_id.value), count = Number(form.elements.participants.value);
+          if (!Number.isInteger(count) || count < 2 || count > 12) return notify('Выберите от 2 до 12 участников.',true);
+          button.disabled = true; button.textContent = 'Подбираем типажи…';
+          try {
+            const {personas,source_count} = await api(`/studies/${s.id}/digital-focus/suggest`,'POST',{monitor_id:monitorId,participants:count,guide:form.elements.guide.value});
+            if (form.isConnected && Number(form.elements.monitor_id.value) === monitorId && Number(form.elements.participants.value) === count) { showPersonas(personas); notify(`Предложены типажи по ${source_count} комментариям`); }
+          } catch (error) { notify(error.message,true); }
+          finally { button.disabled = false; button.textContent = 'Предложить типажи по комментариям'; }
+        };
         form.querySelector('#digital-guide-file').onchange = async event => {
           const file = event.target.files[0]; if (!file) return;
           if (!/\.(txt|md)$/i.test(file.name) || file.size > 100000) return notify('Нужен текстовый гайд .txt или .md до 100 КБ',true);
@@ -866,7 +888,7 @@
           event.preventDefault(); const button = form.querySelector('[type="submit"]'); button.disabled = true;
           try {
             const data = Object.fromEntries(new FormData(form));
-            const result = await api(`/studies/${s.id}/digital-focus`,'POST',{title:data.title,guide:data.guide,monitor_id:Number(data.monitor_id),participants:Number(data.participants)});
+            const result = await api(`/studies/${s.id}/digital-focus`,'POST',{title:data.title,guide:data.guide,monitor_id:Number(data.monitor_id),participants:Number(data.participants),personas:currentPersonas()});
             await loadDigitalFocus(s.id); await openDigitalFocus(s,result.id);
           } catch (error) { notify(error.message,true); button.disabled = false; }
         };
@@ -876,7 +898,12 @@
       try {
         const {session, messages} = await api(`/studies/${s.id}/digital-focus/${id}`);
         const base = `/studies/${s.id}/digital-focus/${id}`;
-        openModal(esc(session.title), `<p class="muted">Симулированные участники на основе ${session.monitor_id ? 'комментариев Telegram' : 'сохранённых комментариев Telegram'}. Их реплики не являются мнением реальных респондентов.</p><details><summary>Гайд модератора</summary><div class="focus-guide" style="white-space:pre-wrap">${esc(session.guide)}</div></details><div class="digital-dialog" aria-live="polite">${messages.length ? messages.map(m => `<article class="chat-message ${m.speaker === 0 ? 'own' : ''}"><header><strong>${m.speaker === 0 ? 'Модератор' : 'Цифровой участник '+m.speaker}</strong></header><p>${esc(m.body)}</p>${m.sources.length ? `<small>Основано на комментариях: ${m.sources.map(source => `<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">#${source.id}</a>`).join(', ')}</small>` : ''}</article>`).join('') : '<p class="muted">Начните с вопроса из гайда.</p>'}</div>${session.finished ? '<p class="muted">Группа завершена. Диалог сохранён.</p>' : `<form id="digital-turn" class="form-grid"><label class="field-label">Реплика модератора<textarea name="question" maxlength="2000" required placeholder="Задайте вопрос или предложите участникам обсудить ответы друг друга"></textarea></label><button class="btn" type="submit">Отправить и получить ответы</button></form><button id="digital-finish" class="btn small secondary" type="button">Завершить группу</button>`}`,true);
+        const personas = session.personas;
+        openModal(esc(session.title), `<p class="muted">Симулированные участники на основе комментариев Telegram. Их реплики не являются мнением реальных респондентов.</p>
+          <details><summary>Гайд модератора</summary><div class="focus-guide" style="white-space:pre-wrap">${esc(session.guide)}</div></details>
+          <details><summary>Типажи участников</summary>${personas.map((p,i) => `<p><strong>${i+1}. ${esc(p.name)}</strong><br>${esc(p.prompt || 'Индивидуальный промт не задан')}</p>`).join('')}</details>
+          <div class="digital-dialog" aria-live="polite">${messages.length ? messages.map(m => `<article class="chat-message ${m.speaker === 0 ? 'own' : ''}"><header><strong>${m.speaker === 0 ? 'Модератор' : esc(personas[m.speaker-1]?.name || 'Цифровой участник '+m.speaker)}</strong></header><p>${esc(m.body)}</p>${m.sources.length ? `<small>Основано на комментариях: ${m.sources.map(source => `<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">#${source.id}</a>`).join(', ')}</small>` : ''}</article>`).join('') : '<p class="muted">Начните с вопроса из гайда.</p>'}</div>
+          ${session.finished ? '<p class="muted">Группа завершена. Диалог сохранён.</p>' : `<form id="digital-turn" class="form-grid"><label class="field-label">Реплика модератора<textarea name="question" maxlength="2000" required placeholder="Задайте вопрос или предложите участникам обсудить ответы друг друга"></textarea></label><button class="btn" type="submit">Отправить и получить ответы</button></form><button id="digital-finish" class="btn small secondary" type="button">Завершить группу</button>`}`,true);
         document.querySelector('.digital-dialog').scrollTop = document.querySelector('.digital-dialog').scrollHeight;
         const form = document.querySelector('#digital-turn');
         if (form) form.onsubmit = async event => {

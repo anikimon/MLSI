@@ -23,7 +23,8 @@ from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
-from digital_focus import make_turn_payload, parse_replies, retrieve
+from digital_focus import (make_turn_payload, parse_replies, parse_suggestions, retrieve,
+                           suggest_personas_payload, validate_personas)
 from media_monitor import (AGENTS, collect as collect_media, summarize as summarize_media,
                            telegram_search, telegram_start_auth, telegram_status, telegram_subscribe,
                            telegram_verify)
@@ -225,6 +226,7 @@ def init_db(path):
                 id INTEGER PRIMARY KEY, study_id INTEGER NOT NULL REFERENCES studies(id),
                 monitor_id INTEGER REFERENCES media_monitors(id) ON DELETE SET NULL,
                 title TEXT NOT NULL, guide TEXT NOT NULL, participants INTEGER NOT NULL,
+                personas TEXT NOT NULL DEFAULT '[]',
                 finished INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS digital_focus_sources (
@@ -238,6 +240,8 @@ def init_db(path):
             );
             CREATE INDEX IF NOT EXISTS digital_focus_messages_recent ON digital_focus_messages(session_id, id);
             """)
+            if "personas" not in {row["name"] for row in db.execute("PRAGMA table_info(digital_focus_sessions)")}:
+                db.execute("ALTER TABLE digital_focus_sessions ADD COLUMN personas TEXT NOT NULL DEFAULT '[]'")
             monitor_columns = {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}
             if "region" not in monitor_columns:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN region TEXT NOT NULL DEFAULT ''")
@@ -322,6 +326,15 @@ def clean_text(value, max_len, required=False):
     if len(value) > max_len or (required and not value):
         raise ApiError(400, f"Текст должен содержать от 1 до {max_len} символов")
     return value
+
+
+def telegram_comment_sources(db, monitor_id):
+    """Use only Telegram comments with canonical public links as grounded sources."""
+    rows = db.execute("""SELECT url, title, excerpt FROM media_items WHERE monitor_id = ?
+        AND source = 'telegram' AND item_type = 'comment' ORDER BY id DESC LIMIT 2000""", (monitor_id,))
+    return [(row["url"], (row["excerpt"] or row["title"]).strip()[:1200]) for row in rows
+            if re.fullmatch(r"https://t\.me/[A-Za-z0-9_]+/\d+\?comment=\d+", row["url"])
+            and (row["excerpt"] or row["title"]).strip()]
 
 
 def media_ai_report(question, region, summary, rows):
@@ -871,6 +884,12 @@ class Handler(BaseHTTPRequestHandler):
                              *history, {"role": "user", "content": question}]}
             answer = deepseek_answer(payload, key)
             self.send_json(200, {"answer": answer[:10000]})
+            return
+        suggest = re.fullmatch(r"/api/studies/(\d+)/digital-focus/suggest", path)
+        if suggest:
+            study_id = int(suggest[1])
+            study_exists(db, study_id)
+            self.digital_focus_route(db, study_id, None, "suggest", method)
             return
         match = re.fullmatch(r"/api/studies/(\d+)(?:/(files|questionnaire|responses.csv|responses|refusals|weighting|quotas|members|member-quotas|survey-link|focus|digital-focus|messages|associations|import|report|report.pdf|analytical-report|analytical-report.pdf|presentation|presentation.pptx|presentation-template)(?:/(\d+)(?:/(audio|transcribe|transcript|guide|turn|finish))?)?)?", path)
         if not match:
@@ -1553,30 +1572,54 @@ class Handler(BaseHTTPRequestHandler):
     def digital_focus_route(self, db, study_id, session_id, action, method):
         self.require(db, {"admin", "researcher"})
         if session_id is None:
-            if method == "GET":
-                sessions = [dict(row) for row in db.execute("""SELECT s.*, COUNT(DISTINCT src.id) AS source_count
+            if method == "GET" and action is None:
+                sessions = [dict(row) for row in db.execute("""SELECT s.id, s.title, s.participants, s.finished, s.created_at,
+                    COUNT(src.id) AS source_count
                     FROM digital_focus_sessions s LEFT JOIN digital_focus_sources src ON src.session_id = s.id
                     WHERE s.study_id = ? GROUP BY s.id ORDER BY s.id DESC""", (study_id,))]
                 self.send_json(200, {"sessions": sessions})
                 return
-            if method == "POST":
+            if method == "POST" and action == "suggest":
+                data = self.read_json()
+                monitor_id, count = data.get("monitor_id"), data.get("participants", 3)
+                if type(monitor_id) is not int or type(count) is not int or not 2 <= count <= 12:
+                    raise ApiError(400, "Выберите мониторинг и от 2 до 12 цифровых участников")
+                guide = clean_text(data.get("guide", ""), 20000)
+                if not db.execute("SELECT 1 FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone():
+                    raise ApiError(404, "Мониторинг не найден")
+                sources = telegram_comment_sources(db, monitor_id)
+                if len(sources) < 3:
+                    raise ApiError(400, "В мониторинге пока меньше трёх доступных Telegram-комментариев")
+                # Sample the full snapshot rather than only its most recent channel posts.
+                sample = [sources[i][1] for i in dict.fromkeys(
+                    i * (len(sources) - 1) // (min(60, len(sources)) - 1) for i in range(min(60, len(sources))))]
+                raw = deepseek_answer(suggest_personas_payload(sample, count, guide), deepseek_key(), timeout=90)
+                try:
+                    personas = parse_suggestions(raw, count)
+                except ValueError as exc:
+                    raise ApiError(502, str(exc)) from exc
+                self.send_json(200, {"personas": personas, "source_count": len(sources)})
+                return
+            if method == "POST" and action is None:
                 data = self.read_json()
                 title = clean_text(data.get("title", ""), 180, True)
                 guide = clean_text(data.get("guide", ""), 20000, True)
                 monitor_id, participants = data.get("monitor_id"), data.get("participants", 3)
-                if type(monitor_id) is not int or type(participants) is not int or not 2 <= participants <= 5:
-                    raise ApiError(400, "Выберите мониторинг и от 2 до 5 цифровых участников")
+                if type(monitor_id) is not int or type(participants) is not int or not 2 <= participants <= 12:
+                    raise ApiError(400, "Выберите мониторинг и от 2 до 12 цифровых участников")
+                default_personas = [{"name": f"Участник {i}", "prompt": ""} for i in range(1, participants + 1)]
+                try:
+                    personas = validate_personas(data.get("personas", default_personas), participants)
+                except ValueError as exc:
+                    raise ApiError(400, str(exc)) from exc
                 if not db.execute("SELECT 1 FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone():
                     raise ApiError(404, "Мониторинг не найден")
-                sources = db.execute("""SELECT url, title, excerpt FROM media_items WHERE monitor_id = ?
-                    AND source = 'telegram' AND item_type = 'comment' ORDER BY id DESC LIMIT 2000""", (monitor_id,)).fetchall()
-                sources = [(row["url"], (row["excerpt"] or row["title"]).strip()[:1200]) for row in sources
-                           if re.match(r"^https://t\.me/[A-Za-z0-9_]+/\d+\?comment=\d+$", row["url"]) and (row["excerpt"] or row["title"]).strip()]
+                sources = telegram_comment_sources(db, monitor_id)
                 if len(sources) < 3:
                     raise ApiError(400, "В мониторинге пока меньше трёх доступных Telegram-комментариев")
                 cursor = db.execute("""INSERT INTO digital_focus_sessions
-                    (study_id, monitor_id, title, guide, participants, created_at) VALUES (?, ?, ?, ?, ?, ?)""",
-                    (study_id, monitor_id, title, guide, participants, now()))
+                    (study_id, monitor_id, title, guide, participants, personas, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (study_id, monitor_id, title, guide, participants, json.dumps(personas, ensure_ascii=False), now()))
                 db.executemany("INSERT INTO digital_focus_sources (session_id, url, body) VALUES (?, ?, ?)",
                                [(cursor.lastrowid, url, body) for url, body in sources])
                 self.send_json(201, {"id": cursor.lastrowid, "source_count": len(sources)})
@@ -1594,7 +1637,10 @@ class Handler(BaseHTTPRequestHandler):
             sources = {row["id"]: row["url"] for row in db.execute("SELECT id, url FROM digital_focus_sources WHERE session_id = ?", (session_id,)) if row["id"] in cited}
             for row in messages:
                 row["sources"] = [{"id": i, "url": sources[i]} for i in json.loads(row.pop("source_ids")) if i in sources]
-            self.send_json(200, {"session": dict(session), "messages": messages})
+            details = dict(session)
+            details["personas"] = json.loads(session["personas"] or "[]") or [
+                {"name": f"Участник {i}", "prompt": ""} for i in range(1, session["participants"] + 1)]
+            self.send_json(200, {"session": details, "messages": messages})
             return
         if method == "POST" and action == "finish":
             self.read_json()
@@ -1610,11 +1656,13 @@ class Handler(BaseHTTPRequestHandler):
                 if db.execute("SELECT finished FROM digital_focus_sessions WHERE id = ?", (session_id,)).fetchone()[0]:
                     raise ApiError(409, "Цифровая группа завершена")
                 history = [dict(row) for row in db.execute("""SELECT speaker, body FROM digital_focus_messages
-                    WHERE session_id = ? ORDER BY id DESC LIMIT 12""", (session_id,))][::-1]
+                    WHERE session_id = ? ORDER BY id DESC LIMIT 26""", (session_id,))][::-1]
                 sources = [dict(row) for row in db.execute("SELECT id, body FROM digital_focus_sources WHERE session_id = ?", (session_id,))]
                 evidence = retrieve(sources, question, session["guide"], history)
-                payload = make_turn_payload(session["guide"], session["participants"], history, question, evidence)
-                raw = deepseek_answer(payload, deepseek_key(), timeout=90)
+                personas = json.loads(session["personas"] or "[]") or [
+                    {"name": f"Участник {i}", "prompt": ""} for i in range(1, session["participants"] + 1)]
+                payload = make_turn_payload(session["guide"], personas, history, question, evidence)
+                raw = deepseek_answer(payload, deepseek_key(), timeout=120, max_bytes=131072)
                 try:
                     replies = parse_replies(raw, session["participants"], evidence)
                 except ValueError as exc:

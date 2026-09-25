@@ -79,6 +79,7 @@ class PlannerTest(unittest.TestCase):
         base = f"/studies/{sid}/digital-focus"
         form = {"title": "Обсуждение", "guide": "Что улучшить в парках?", "participants": 3, "monitor_id": mid}
         self.assertEqual(self.request(self.admin, base, "POST", form)[0], 400)
+        self.assertEqual(self.request(self.admin, base + "/suggest", "POST", {"monitor_id": mid, "participants": 12})[0], 400)
         with closing(sqlite3.connect(self.db_path)) as db, db:
             for i in range(4):
                 db.execute("""INSERT INTO media_items (monitor_id, source, title, excerpt, url, published, collected_at, item_type)
@@ -89,6 +90,18 @@ class PlannerTest(unittest.TestCase):
         status, created = self.request(self.admin, base, "POST", form)
         self.assertEqual((status, created["source_count"]), (201, 3))
         fid = created["id"]
+        personas = [{"name": f"Типаж {i}", "prompt": f"Отстаивает позицию {i}"} for i in range(1, 13)]
+        with patch("server.deepseek_key", return_value="test"), patch("server.deepseek_answer", return_value=json.dumps({"personas": personas})) as suggest:
+            status, proposed = self.request(self.admin, base + "/suggest", "POST", {"monitor_id": mid, "participants": 12, "guide": "Парки"})
+        self.assertEqual((status, proposed["source_count"], len(proposed["personas"])), (200, 3, 12))
+        sent = json.loads(suggest.call_args.args[0]["messages"][1]["content"])
+        self.assertEqual(len(sent["comments"]), 3)
+        self.assertTrue(all("деревьев" in comment for comment in sent["comments"]))
+        self.assertEqual(self.request(self.admin, base + "/suggest", "POST", {"monitor_id": mid, "participants": 13})[0], 400)
+        self.assertEqual(self.request(self.admin, base, "POST", {**form, "participants": 13})[0], 400)
+        self.assertEqual(self.request(self.admin, base, "POST", {**form, "participants": 12, "personas": personas[:3]})[0], 400)
+        twelve = self.request(self.admin, base, "POST", {**form, "title": "Большая группа", "participants": 12, "personas": personas})[1]["id"]
+        self.assertEqual(self.request(self.admin, f"{base}/{twelve}")[1]["session"]["personas"], personas)
         self.assertEqual(self.request(self.admin, f"/studies/{other}/digital-focus/{fid}")[0], 404)
         self.assertEqual(self.request(self.interviewer, f"{base}/{fid}")[0], 401)
         self.assertEqual(self.request(self.admin, f"{base}/{fid}")[1]["messages"], [])
@@ -109,11 +122,34 @@ class PlannerTest(unittest.TestCase):
         with patch("server.deepseek_key", return_value="test"), patch("server.deepseek_answer", return_value='{"replies":[]}'):
             self.assertEqual(self.request(self.admin, f"{base}/{fid}/turn", "POST", {"question": "Повтор"})[0], 502)
         self.assertEqual(len(self.request(self.admin, f"{base}/{fid}")[1]["messages"]), 4)
+        def twelve_answers(payload, key, **kwargs):
+            request = json.loads(payload["messages"][1]["content"])
+            self.assertEqual(request["personas"][11]["prompt"], "Отстаивает позицию 12")
+            source_id = request["evidence"][0]["id"]
+            return json.dumps({"replies": [{"speaker": i, "text": f"Ответ {i}", "source_ids": [source_id]}
+                                           for i in range(1, 13)]})
+        with patch("server.deepseek_key", return_value="test"), patch("server.deepseek_answer", side_effect=twelve_answers):
+            self.assertEqual(self.request(self.admin, f"{base}/{twelve}/turn", "POST", {"question": "Что улучшить?"})[0], 200)
+        self.assertEqual(len(self.request(self.admin, f"{base}/{twelve}")[1]["messages"]), 13)
         self.assertEqual(self.request(self.admin, f"{base}/{fid}/finish", "POST", {})[0], 200)
         self.assertEqual(self.request(self.admin, f"{base}/{fid}/turn", "POST", {"question": "Ещё вопрос"})[0], 409)
         self.assertEqual(self.request(self.admin, f"/media/{mid}", "DELETE")[0], 200)
         self.assertEqual(len(self.request(self.admin, f"{base}/{fid}")[1]["messages"]), 4)
         self.assertEqual(self.request(self.admin, f"/studies/{sid}", "DELETE")[0], 200)
+
+    def test_digital_focus_migrates_existing_sessions(self):
+        path = Path(self.temp.name) / "previous.db"
+        init_db(path)
+        with closing(sqlite3.connect(path)) as db, db:
+            db.execute("DROP TABLE digital_focus_sessions")
+            db.execute("""CREATE TABLE digital_focus_sessions (
+                id INTEGER PRIMARY KEY, study_id INTEGER NOT NULL, monitor_id INTEGER,
+                title TEXT NOT NULL, guide TEXT NOT NULL, participants INTEGER NOT NULL,
+                finished INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)""")
+        init_db(path)
+        with closing(sqlite3.connect(path)) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(digital_focus_sessions)")}
+            self.assertIn("personas", columns)
 
 
     def test_telegram_media_monitor_collects_deduplicates_exports_and_enforces_roles(self):
