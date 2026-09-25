@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -48,6 +49,55 @@ class FakeClient:
 
 
 class SummaryTest(unittest.TestCase):
+    def test_telegram_client_uses_optional_socks5_proxy(self):
+        with tempfile.TemporaryDirectory() as folder:
+            settings = {"TELEGRAM_API_ID": "12345", "TELEGRAM_API_HASH": "test-hash",
+                        "TELEGRAM_SESSION_FILE": os.path.join(folder, "telegram.session"),
+                        "TELEGRAM_PROXY_HOST": "proxy.example.org", "TELEGRAM_PROXY_PORT": "1080",
+                        "TELEGRAM_PROXY_USER": "account", "TELEGRAM_PROXY_PASSWORD": "secret"}
+            with patch("telethon.TelegramClient") as client, patch.dict(os.environ, settings):
+                media_monitor._telegram_client()
+            self.assertEqual(client.call_args.kwargs["proxy"], {
+                "proxy_type": "socks5", "addr": "proxy.example.org", "port": 1080,
+                "rdns": True, "username": "account", "password": "secret"})
+            without_proxy = {**settings, **{key: "" for key in settings if key.startswith("TELEGRAM_PROXY_")}}
+            with patch("telethon.TelegramClient") as client, patch.dict(os.environ, without_proxy):
+                media_monitor._telegram_client()
+            self.assertNotIn("proxy", client.call_args.kwargs)
+
+    def test_telegram_proxy_rejects_incomplete_configuration(self):
+        for settings in ({"TELEGRAM_PROXY_HOST": "proxy.example.org"},
+                         {"TELEGRAM_PROXY_PORT": "1080"},
+                         {"TELEGRAM_PROXY_HOST": "proxy.example.org", "TELEGRAM_PROXY_PORT": "invalid"},
+                         {"TELEGRAM_PROXY_HOST": "proxy.example.org", "TELEGRAM_PROXY_PORT": "65536"},
+                         {"TELEGRAM_PROXY_HOST": "proxy.example.org", "TELEGRAM_PROXY_PORT": "1080",
+                          "TELEGRAM_PROXY_PASSWORD": "secret"}):
+            with self.subTest(settings=tuple(settings)):
+                with patch.dict(os.environ, settings, clear=True):
+                    with self.assertRaises(ValueError) as error:
+                        media_monitor.telegram_proxy()
+                self.assertNotIn("secret", str(error.exception))
+
+    def test_telegram_status_does_not_block_when_collector_is_busy(self):
+        with patch.dict(media_monitor.os.environ, {"TELEGRAM_API_ID": "123", "TELEGRAM_API_HASH": "placeholder"}):
+            with media_monitor.TELEGRAM_LOCK:
+                result = media_monitor.telegram_status()
+        self.assertTrue(result["configured"])
+        self.assertFalse(result["authorized"])
+        self.assertIn("занят", result["message"])
+
+    def test_telegram_status_times_out_and_releases_lock(self):
+        async def timeout_authorization(client):
+            raise TimeoutError()
+
+        with patch.dict(media_monitor.os.environ, {"TELEGRAM_API_ID": "123", "TELEGRAM_API_HASH": "placeholder"}), \
+                patch("media_monitor._telegram_client", return_value=object()), \
+                patch("media_monitor._telegram_authorized", side_effect=timeout_authorization):
+            result = media_monitor.telegram_status()
+        self.assertIn("Таймаут", result["message"])
+        self.assertTrue(media_monitor.TELEGRAM_LOCK.acquire(blocking=False))
+        media_monitor.TELEGRAM_LOCK.release()
+
     def test_rising_terms_are_observed_overall(self):
         titles = ["Economy and markets", "Economy and trade", "Markets improve",
                   "Climate flooding report", "Climate flooding warning", "Climate flooding response"]

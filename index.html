@@ -349,7 +349,12 @@
       let response;
       try { response = await fetch('/api' + path, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: 'same-origin' }); }
       catch { state.offline = true; throw new Error('Нет соединения с сервером. Данные остаются на устройстве.'); }
-      const data = await response.json();
+      const text = await response.text();
+      let data = {};
+      if (text) {
+        try { data = JSON.parse(text); }
+        catch { throw new Error(response.ok ? 'Сервер вернул некорректный ответ. Попробуйте позже.' : `Ошибка сервера (${response.status}). Попробуйте позже.`); }
+      }
       if (!response.ok) { if (response.status === 401 && path !== '/login') { state.user = null; renderAuth(false); } throw new Error(data.error || 'Не удалось выполнить запрос'); }
       return data;
     }
@@ -447,12 +452,7 @@
        const results = document.querySelector('#telegram-results');
        const form = document.querySelector('#media-form');
        if (!status || !results || !form) return;
-       try {
-         const telegram = await api('/telegram/status');
-         status.textContent = telegram.authorized ? 'Авторизован' : (telegram.message || 'Не авторизован');
-         status.style.color = telegram.authorized ? '#27789e' : '#a34442';
-       } catch (error) { status.textContent = error.message; }
-       const start = document.querySelector('#telegram-auth-start');
+        const start = document.querySelector('#telegram-auth-start');
        const codeBox = document.querySelector('#telegram-auth-code');
        start.onclick = async () => {
          start.disabled = true;
@@ -464,7 +464,7 @@
          try { const result = await api('/telegram/auth/verify','POST',{code:document.querySelector('#telegram-code').value,password:document.querySelector('#telegram-password').value}); if (result.password_required) notify('Введите пароль двухэтапной проверки Telegram',true); else { status.textContent = 'Авторизован'; status.style.color = '#27789e'; notify('Telegram подключён'); } }
          catch (error) { notify(error.message,true); } finally { button.disabled = false; }
        };
-       document.querySelector('#telegram-search').onclick = async () => {
+        document.querySelector('#telegram-search').onclick = async () => {
          const button = document.querySelector('#telegram-search'); button.disabled = true; results.textContent = 'Ищем публичные каналы…';
          try {
            const fields = new FormData(form); const found = await api('/telegram/search','POST',{question:fields.get('question'),region:fields.get('region')});
@@ -475,9 +475,15 @@
              try { const response = await api('/telegram/subscribe','POST',{channels:selected}); const accepted = response.channels.filter(item => item.status === 'subscribed').map(item => `https://t.me/${item.username}`); const area = form.querySelector('[name="telegram_channels"]'); area.value = [...new Set(area.value.split(/\r?\n/).map(item => item.trim()).filter(Boolean).concat(accepted))].join('\n'); notify(`Добавлено каналов: ${accepted.length}`); }
              catch (error) { notify(error.message,true); } finally { confirmButton.disabled = false; }
            });
-         } catch (error) { results.textContent = error.message; } finally { button.disabled = false; }
-       };
-     }
+          } catch (error) { results.textContent = error.message; } finally { button.disabled = false; }
+        };
+        try {
+          const telegram = await api('/telegram/status');
+          if (!status.isConnected) return;
+          status.textContent = telegram.authorized ? 'Авторизован' : (telegram.message || 'Не авторизован');
+          status.style.color = telegram.authorized ? '#27789e' : '#a34442';
+        } catch (error) { if (status.isConnected) status.textContent = error.message; }
+      }
      async function loadMedia() {
       const list = document.querySelector('#media-topics');
       if (!list) return;

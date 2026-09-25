@@ -77,6 +77,30 @@ def telegram_session_name():
     return os.environ.get("TELEGRAM_SESSION_FILE", str(ROOT / "data" / "telegram.session"))
 
 
+def telegram_proxy():
+    """Optional SOCKS5 transport for hosts without direct MTProto access."""
+    host = os.environ.get("TELEGRAM_PROXY_HOST", "").strip()
+    port = os.environ.get("TELEGRAM_PROXY_PORT", "").strip()
+    if not host and not port:
+        return None
+    if not host or any(char.isspace() for char in host) or not port:
+        raise ValueError("Укажите TELEGRAM_PROXY_HOST и TELEGRAM_PROXY_PORT для SOCKS5")
+    try:
+        port_number = int(port)
+    except ValueError as exc:
+        raise ValueError("TELEGRAM_PROXY_PORT должен быть числом от 1 до 65535") from exc
+    if not 1 <= port_number <= 65535:
+        raise ValueError("TELEGRAM_PROXY_PORT должен быть числом от 1 до 65535")
+    username = os.environ.get("TELEGRAM_PROXY_USER", "").strip()
+    password = os.environ.get("TELEGRAM_PROXY_PASSWORD", "")
+    if bool(username) != bool(password):
+        raise ValueError("Для SOCKS5 задайте и TELEGRAM_PROXY_USER, и TELEGRAM_PROXY_PASSWORD")
+    proxy = {"proxy_type": "socks5", "addr": host, "port": port_number, "rdns": True}
+    if username:
+        proxy.update({"username": username, "password": password})
+    return proxy
+
+
 def _telegram_client():
     try:
         from telethon import TelegramClient
@@ -90,7 +114,8 @@ def _telegram_client():
         raise ValueError("TELEGRAM_API_ID должен быть числом") from exc
     session = os.environ.get("TELEGRAM_SESSION", "").strip() or telegram_session_name()
     Path(session).parent.mkdir(parents=True, exist_ok=True)
-    return TelegramClient(session, api_id, os.environ["TELEGRAM_API_HASH"].strip())
+    proxy = telegram_proxy()
+    return TelegramClient(session, api_id, os.environ["TELEGRAM_API_HASH"].strip(), **({"proxy": proxy} if proxy else {}))
 
 
 def _telegram_run(operation):
@@ -99,27 +124,36 @@ def _telegram_run(operation):
 
 
 async def _telegram_authorized(client):
-    await client.connect()
-    authorized = await client.is_user_authorized()
-    await client.disconnect()
-    return authorized
+    try:
+        await client.connect()
+        return await client.is_user_authorized()
+    finally:
+        await client.disconnect()
 
 
 def telegram_status():
     if not telegram_configured():
         return {"configured": False, "authorized": False, "message": "Задайте TELEGRAM_API_ID и TELEGRAM_API_HASH"}
+    if not TELEGRAM_LOCK.acquire(blocking=False):
+        return {"configured": True, "authorized": False, "message": "Telegram занят. Повторите проверку позже"}
     try:
-        authorized = _telegram_run(lambda: _telegram_authorized(_telegram_client()))
-    except (ValueError, OSError) as exc:
+        authorized = asyncio.run(asyncio.wait_for(_telegram_authorized(_telegram_client()), timeout=12))
+    except TimeoutError:
+        return {"configured": True, "authorized": False, "message": "Таймаут подключения к Telegram. Проверьте доступ сервера к Telegram"}
+    except Exception as exc:
         return {"configured": True, "authorized": False, "message": str(exc)[:180]}
+    finally:
+        TELEGRAM_LOCK.release()
     return {"configured": True, "authorized": authorized, "message": "Готово" if authorized else "Требуется авторизация"}
 
 
 async def _telegram_start_auth(phone):
     client = _telegram_client()
-    await client.connect()
-    sent = await client.send_code_request(phone)
-    await client.disconnect()
+    try:
+        await client.connect()
+        sent = await client.send_code_request(phone)
+    finally:
+        await client.disconnect()
     TELEGRAM_AUTH.update({"phone": phone, "phone_code_hash": sent.phone_code_hash})
     return {"ok": True, "password_required": False}
 
