@@ -1,4 +1,4 @@
-"""Bounded public-source collectors and deterministic media analysis."""
+"""Telegram public-channel monitoring and deterministic media analysis."""
 
 import html
 import json
@@ -6,16 +6,15 @@ import os
 import asyncio
 import re
 import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
 
-MAX_RESPONSE = 1024 * 1024
-AGENTS = ("VK · публичные сообщества", "VK · посты и комментарии", "Telegram · публичные каналы", "Telegram · посты и комментарии", "Аналитик · тональность и тренды", "ИИ · подробный аналитический отчёт")
+AGENTS = ("Telegram · публичные каналы", "Telegram · посты", "Telegram · комментарии", "Аналитик · тональность и тренды", "ИИ · подробный аналитический отчёт")
+DEFAULT_LOOKBACK_HOURS = 24
+MAX_LOOKBACK_HOURS = 720
 TELEGRAM_LOCK = Lock()
 TELEGRAM_AUTH = {}
 ROOT = Path(__file__).resolve().parent
@@ -68,27 +67,6 @@ def safe_url(value):
         return None
     parts = urllib.parse.urlsplit(value)
     return value if parts.scheme == "https" and parts.hostname and not parts.username and not parts.password else None
-
-
-def fetch(url):
-    request = urllib.request.Request(url, headers={"User-Agent": "MLSI-MediaMonitor/1.0 (public RSS/API)"})
-    with urllib.request.urlopen(request, timeout=12) as response:
-        content = response.read(MAX_RESPONSE + 1)
-    if len(content) > MAX_RESPONSE:
-        raise ValueError("Источник вернул слишком большой ответ")
-    return content
-
-
-def vk_api(method, params):
-    token = os.environ.get("VK_ACCESS_TOKEN", "").strip()
-    if not token:
-        raise ValueError("VK_ACCESS_TOKEN не настроен")
-    query = {**params, "access_token": token, "v": "5.199"}
-    data = json.loads(fetch("https://api.vk.com/method/" + method + "?" + urllib.parse.urlencode(query)))
-    if not isinstance(data, dict) or "error" in data:
-        error = data.get("error", {}) if isinstance(data, dict) else {}
-        raise ValueError("VK API: " + str(error.get("error_msg", "неожиданный ответ"))[:120])
-    return data.get("response", {})
 
 
 def telegram_configured():
@@ -250,7 +228,19 @@ def telegram_subscribe(channels):
     return _telegram_run(lambda: _telegram_subscribe(channels))
 
 
-async def _telegram_agent(question, region="", channels=()):
+def _message_date(value):
+    if not isinstance(value, datetime):
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+async def _telegram_agent(question, region="", channels=(), lookback_hours=DEFAULT_LOOKBACK_HOURS):
+    """Read public posts and comments published within the requested lookback window."""
+    try:
+        hours = max(1, min(MAX_LOOKBACK_HOURS, int(lookback_hours)))
+    except (TypeError, ValueError):
+        hours = DEFAULT_LOOKBACK_HOURS
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     client = _telegram_client()
     await client.connect()
     records = []
@@ -265,7 +255,10 @@ async def _telegram_agent(question, region="", channels=()):
                 continue
             title = clean_markup(getattr(entity, "title", username))[:180]
             public_name = getattr(entity, "username", None) or username
-            async for message in client.iter_messages(entity, limit=20):
+            async for message in client.iter_messages(entity, limit=200):
+                message_date = _message_date(getattr(message, "date", None))
+                if message_date and message_date < cutoff:
+                    break
                 text = clean_markup(getattr(message, "message", ""))[:900]
                 message_id = getattr(message, "id", 0)
                 if not text or not message_id:
@@ -276,7 +269,10 @@ async def _telegram_agent(question, region="", channels=()):
                                 "community": title, "region": region[:180], "author": title,
                                 "engagement": int(getattr(message, "views", 0) or 0) + int(getattr(message, "forwards", 0) or 0)})
                 try:
-                    async for comment in client.iter_messages(entity, reply_to=message_id, limit=20):
+                    async for comment in client.iter_messages(entity, reply_to=message_id, limit=100):
+                        comment_date = _message_date(getattr(comment, "date", None))
+                        if comment_date and comment_date < cutoff:
+                            break
                         comment_text = clean_markup(getattr(comment, "message", ""))[:900]
                         comment_id = getattr(comment, "id", 0)
                         if comment_text and comment_id:
@@ -286,181 +282,18 @@ async def _telegram_agent(question, region="", channels=()):
                                             "community": title, "region": region[:180], "author": "Telegram user",
                                             "engagement": int(getattr(comment, "views", 0) or 0)})
                 except Exception:
-                    pass
+                    continue
     finally:
         await client.disconnect()
     return records
 
 
-def telegram_agent(question, region="", channels=()):
-    return _telegram_run(lambda: _telegram_agent(question, region, channels))
+def telegram_agent(question, region="", channels=(), lookback_hours=DEFAULT_LOOKBACK_HOURS):
+    return _telegram_run(lambda: _telegram_agent(question, region, channels, lookback_hours))
 
 
-def vk_agent(question, region="", group_links=()):
-    """Collect public VK communities, posts and a bounded sample of comments."""
-    queries = []
-    for query in (region, question, " ".join(part for part in (question, region) if part)):
-        query = str(query or "").strip()
-        if query and query not in queries:
-            queries.append(query)
-    groups = []
-    seen_groups = set()
-    for link in group_links or ():
-        path = urllib.parse.urlsplit(str(link)).path.strip("/")
-        path = re.sub(r"^(?:club|public|group)/?", "", path, flags=re.I)
-        match = re.fullmatch(r"(\d+)", path)
-        if match:
-            group_id = int(match.group(1))
-            if group_id not in seen_groups:
-                seen_groups.add(group_id)
-                groups.append({"id": group_id, "screen_name": path, "name": f"VK group {group_id}"})
-            continue
-        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{2,80}", path):
-            try:
-                found = vk_api("groups.getById", {"group_ids": path}).get("groups", [])
-            except (ValueError, OSError, TypeError, json.JSONDecodeError):
-                found = []
-            for group in found:
-                group_id = int(group.get("id", 0))
-                if group_id and group_id not in seen_groups:
-                    seen_groups.add(group_id)
-                    groups.append(group)
-    for query in queries:
-        found = vk_api("groups.search", {"q": query, "count": 12, "type": "group", "sort": 0}).get("items", [])
-        for group in found:
-            group_id = int(group.get("id", 0))
-            if group_id and group_id not in seen_groups:
-                seen_groups.add(group_id)
-                groups.append(group)
-        if len(groups) >= 12:
-            break
-    records = []
-    for group in groups[:12]:
-        group_id = int(group.get("id", 0))
-        if not group_id:
-            continue
-        slug = group.get("screen_name") or str(group_id)
-        try:
-            wall = vk_api("wall.get", {"owner_id": -group_id, "count": 20, "filter": "owner"}).get("items", [])
-        except (ValueError, OSError, TypeError, json.JSONDecodeError):
-            continue
-        for post in wall[:20]:
-            post_id = int(post.get("id", 0))
-            text = clean_markup(post.get("text", ""))[:900]
-            if not post_id or not text:
-                continue
-            url = f"https://vk.com/{slug}?w=wall-{group_id}_{post_id}"
-            records.append({"source": "vk", "title": text[:180], "excerpt": text, "url": url,
-                            "published": str(post.get("date", ""))[:100], "item_type": "post",
-                            "community": clean_markup(group.get("name", ""))[:180], "region": region[:180],
-                            "author": clean_markup(group.get("name", ""))[:180],
-                            "engagement": int(post.get("comments", {}).get("count", 0)) + int(post.get("likes", {}).get("count", 0))})
-            try:
-                comments = vk_api("wall.getComments", {"owner_id": -group_id, "post_id": post_id, "count": 20,
-                                                           "sort": "desc", "preview_length": 0}).get("items", [])
-            except (ValueError, OSError, TypeError, json.JSONDecodeError):
-                comments = []
-            for comment in comments[:20]:
-                comment_text = clean_markup(comment.get("text", ""))[:900]
-                if not comment_text:
-                    continue
-                profile_id = int(comment.get("from_id", 0))
-                records.append({"source": "vk", "title": comment_text[:180], "excerpt": comment_text,
-                                "url": url + "&reply=" + str(comment.get("id", "")),
-                                "published": str(comment.get("date", ""))[:100], "item_type": "comment",
-                                "community": clean_markup(group.get("name", ""))[:180], "region": region[:180],
-                                "author": f"VK user {profile_id}" if profile_id else "VK user",
-                                "engagement": int(comment.get("likes", {}).get("count", 0))})
-    if not records:
-        for query in queries[:2]:
-            try:
-                posts = vk_api("wall.search", {"q": query, "count": 100, "owners_only": 0}).get("items", [])
-            except (ValueError, OSError, TypeError, json.JSONDecodeError):
-                continue
-            for post in posts:
-                owner_id = int(post.get("owner_id", 0))
-                post_id = int(post.get("id", 0))
-                text = clean_markup(post.get("text", ""))[:900]
-                if owner_id >= 0 or not post_id or not text:
-                    continue
-                records.append({"source": "vk", "title": text[:180], "excerpt": text,
-                                "url": f"https://vk.com/wall{owner_id}_{post_id}",
-                                "published": str(post.get("date", ""))[:100], "item_type": "post",
-                                "community": "Публичная стена VK", "region": region[:180],
-                                "author": "VK community",
-                                "engagement": int(post.get("comments", {}).get("count", 0)) + int(post.get("likes", {}).get("count", 0))})
-            if records:
-                break
-    return records
-
-
-def news_agent(question, country="RU"):
-    locale = COUNTRIES.get(country, COUNTRIES["RU"])
-    language = locale[1]
-    url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({
-        "q": question, "hl": language, "gl": country if country in COUNTRIES else "RU",
-        "ceid": f"{country}:{language}" if country in COUNTRIES else "RU:ru"})
-    root = ET.fromstring(fetch(url))
-    records = []
-    for item in root.findall("./channel/item")[:30]:
-        link = safe_url(item.findtext("link"))
-        title = clean_markup(item.findtext("title"))[:350]
-        if link and title:
-            records.append({"source": "news", "country": country, "title": title,
-                            "excerpt": clean_markup(item.findtext("description"))[:650],
-                            "url": link, "published": (item.findtext("pubDate") or "")[:100]})
-    return records
-
-
-def social_agent(question, hashtag):
-    if not hashtag:
-        return []
-    url = "https://mastodon.social/api/v1/timelines/tag/" + urllib.parse.quote(hashtag, safe="") + "?limit=40"
-    statuses = json.loads(fetch(url))
-    if not isinstance(statuses, list):
-        raise ValueError("Неожиданный ответ социальной сети")
-    terms = [term for term in re.findall(r"[\wа-яё]{4,}", question.lower()) if term not in STOP]
-    records = []
-    for status in statuses[:40]:
-        if not isinstance(status, dict):
-            continue
-        text = clean_markup(status.get("content", ""))[:900]
-        link = safe_url(status.get("url"))
-        if not link or not text or (terms and not any(term in text.lower() for term in terms)):
-            continue
-        records.append({"source": "social", "title": text[:180], "excerpt": text,
-                        "url": link, "published": str(status.get("created_at", ""))[:100]})
-    return records
-
-
-def bluesky_agent(question):
-    url = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?" + urllib.parse.urlencode({
-        "q": question, "limit": 30, "sort": "latest"})
-    data = json.loads(fetch(url))
-    if not isinstance(data, dict) or not isinstance(data.get("posts"), list):
-        raise ValueError("Неожиданный ответ Bluesky")
-    records = []
-    for post in data["posts"][:30]:
-        if not isinstance(post, dict):
-            continue
-        author = post.get("author") or {}
-        record = post.get("record") or {}
-        handle = author.get("handle", "") if isinstance(author, dict) else ""
-        uri = post.get("uri", "")
-        text = clean_markup(record.get("text", ""))[:900] if isinstance(record, dict) else ""
-        if not isinstance(uri, str) or not isinstance(handle, str) or not re.fullmatch(r"[a-zA-Z0-9.-]{3,255}", handle) or not text:
-            continue
-        rkey = uri.rsplit("/", 1)[-1]
-        if not re.fullmatch(r"[a-zA-Z0-9]{5,40}", rkey):
-            continue
-        records.append({"source": "social", "title": text[:180], "excerpt": text,
-                        "url": f"https://bsky.app/profile/{handle}/post/{rkey}",
-                        "published": str(record.get("createdAt", ""))[:100]})
-    return records
-
-
-def summarize(rows, countries=()):
-    """Describe observed coverage and cite evidence; geographic context is not author nationality."""
+def summarize(rows):
+    """Describe observed Telegram coverage and cite evidence; no author de-anonymisation."""
     rows = [dict(row) for row in rows]
     counts = Counter(row["source"] for row in rows)
     words = Counter(word for row in rows for word in set(re.findall(r"[\wа-яё]{4,}", row["title"].lower()))
@@ -521,15 +354,9 @@ def summarize(rows, countries=()):
         return {"themes": themes[:6], "trending_terms": trending[:6], "conflict_mentions": evidence[:8],
                 "description": (f"Найдено {len(items)} публикаций; ведущие темы: " + ", ".join(t["name"] for t in themes[:3]) + ".") if items else "Публикаций пока нет."}
 
-    selected = [code for code in countries if code in COUNTRIES]
-    by_country = []
-    for code in selected:
-        items = [row for row in rows if row.get("country") == code]
-        by_country.append({"code": code, "name": COUNTRIES[code][0], "total": len(items), **overview(items)})
     narrative_counts = Counter(theme["name"] for theme in overview(rows)["themes"])
     narratives = [{"name": name, "count": count, "share": round(count / len(rows) * 100, 1) if rows else 0}
                   for name, count in narrative_counts.most_common()]
-    social_text = " ".join(row["title"] + " " + row.get("excerpt", "") for row in rows if row.get("source") in ("social", "vk", "telegram")).lower()
     SOCIAL_GROUPS = {
         "Страхи": ("страш", "боят", "опасн", "угроз", "страдан", "fear", "afraid", "danger", "worry"),
         "Потребности": ("нужн", "требу", "хотим", "нужда", "need", "want", "require", "support"),
@@ -538,10 +365,9 @@ def summarize(rows, countries=()):
     }
     social_analysis = []
     for label, stems in SOCIAL_GROUPS.items():
-        hits = sum(1 for row in rows if row.get("source") in ("social", "vk", "telegram") and any(stem in (row["title"] + " " + row.get("excerpt", "")).lower() for stem in stems))
+        hits = sum(1 for row in rows if row.get("source") == "telegram" and any(stem in (row["title"] + " " + row.get("excerpt", "")).lower() for stem in stems))
         if hits:
-            social_analysis.append({"name": label, "count": hits, "share": round(hits / max(1, sum(row.get("source") in ("social", "vk") for row in rows)) * 100, 1)})
-    persons = Counter(row.get("author", "") for row in rows if row.get("author") and row.get("source") == "vk")
+            social_analysis.append({"name": label, "count": hits, "share": round(hits / max(1, counts["telegram"]) * 100, 1)})
     positive = ("хорош", "поддерж", "успех", "помог", "спас", "рад", "справил", "great", "support", "success", "help")
     negative = ("плох", "страш", "опасн", "ненавиж", "проблем", "жалоб", "угроз", "ужас", "bad", "fear", "danger", "problem", "hate")
     sentiment = Counter()
@@ -549,74 +375,51 @@ def summarize(rows, countries=()):
         text = (row.get("title", "") + " " + row.get("excerpt", "")).lower()
         pos, neg = sum(text.count(word) for word in positive), sum(text.count(word) for word in negative)
         sentiment["positive" if pos > neg else "negative" if neg > pos else "neutral"] += 1
-    return {"total": len(rows), "news": counts["news"], "social": counts["social"], "telegram": counts["telegram"],
+    return {"total": len(rows), "telegram": counts["telegram"],
             "terms": [{"word": word, "count": count} for word, count in words.most_common(10)],
-            "overall": overview(rows), "countries": by_country, "narratives": narratives,
-            "social_analysis": social_analysis, "vk_communities": Counter(row.get("community", "") for row in rows if row.get("community") and row.get("source") == "vk").most_common(10),
-            "vk_persons": [{"name": name, "count": count} for name, count in persons.most_common(10)],
+            "overall": overview(rows), "narratives": narratives, "social_analysis": social_analysis,
+            "communities": Counter(row.get("community", "") for row in rows if row.get("community") and row.get("source") == "telegram").most_common(10),
             "sentiment": {"positive": sentiment["positive"], "neutral": sentiment["neutral"], "negative": sentiment["negative"]},
-            "unassigned_social": sum(row["source"] in ("social", "telegram") and not row.get("country") for row in rows),
             "calculated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
-def collect(db, monitor, fetch_news=news_agent, fetch_social=social_agent, fetch_bluesky=bluesky_agent, fetch_vk=vk_agent, fetch_telegram=telegram_agent):
-    """Each collector fails independently; previously saved observations remain available."""
+def collect(db, monitor, fetch_telegram=telegram_agent):
+    """Collect Telegram posts and comments for the lookback window; previous observations stay available."""
     results = {}
     new_count = 0
-    batches = {}
-    countries = json.loads(monitor.get("countries") or "[]")
-    # Existing monitors retain their former Russian-locale search.
     region = str(monitor.get("region", "")).strip()
-    telegram_channels = json.loads(monitor.get("telegram_channels") or "[]")
-    if region:
-        links = json.loads(monitor.get("vk_group_links") or "[]")
-        args = (monitor["question"], region, links) if links else (monitor["question"], region)
-        searches = [("vk", fetch_vk, args, "vk")]
+    try:
+        telegram_channels = json.loads(monitor.get("telegram_channels") or "[]")
+    except (TypeError, ValueError):
+        telegram_channels = []
+    try:
+        lookback = max(1, min(MAX_LOOKBACK_HOURS, int(monitor.get("lookback_hours") or DEFAULT_LOOKBACK_HOURS)))
+    except (TypeError, ValueError):
+        lookback = DEFAULT_LOOKBACK_HOURS
+    if not telegram_channels:
+        results["telegram"] = "Не выбраны Telegram-каналы"
     else:
-        searches = [("news", fetch_news, (monitor["question"], code), code) for code in (countries or ["RU"])]
-    if not region:
-        searches.append(("social", fetch_social, (monitor["question"], monitor["hashtag"]), "mastodon"))
-        searches.append(("social", fetch_bluesky, (monitor["question"],), "bluesky"))
-    if not region and monitor.get("vk_query", monitor["question"]):
-        searches.append(("vk", fetch_vk, (monitor.get("vk_query") or monitor["question"],), "vk"))
-    if telegram_channels:
-        searches.append(("telegram", fetch_telegram, (monitor["question"], region, telegram_channels), "telegram"))
-    for name, agent, args, code in searches:
-        label = f"news:{code}" if countries and name == "news" else (code if name == "social" else name)
-        if code == "mastodon" and not monitor["hashtag"]:
-            results[label] = "Не настроен хэштег"
-            continue
         try:
-            records = agent(*args)
+            records = fetch_telegram(monitor["question"], region, telegram_channels, lookback)
             if not isinstance(records, list):
                 raise ValueError("Источник вернул некорректный список")
-            batches[label] = (name, "" if name in ("social", "vk") else code, records[:100])
-        except Exception as exc:
-            results[label] = "Ошибка источника: " + str(exc)[:140]
-    for label, (name, code, records) in batches.items():
-        try:
-            found = 0
-            for record in records:
+            collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            for record in records[:500]:
                 if not isinstance(record, dict):
                     continue
                 link = safe_url(record.get("url"))
-                if not link or record.get("source") != name:
+                if not link or record.get("source") != "telegram":
                     continue
                 cursor = db.execute("""INSERT OR IGNORE INTO media_items
                     (monitor_id, source, country, title, excerpt, url, published, collected_at, item_type, author, community, engagement)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (monitor["id"], name, code,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (monitor["id"], "telegram", "",
                     str(record.get("title", ""))[:350], str(record.get("excerpt", ""))[:900],
-                    link, str(record.get("published", ""))[:100], datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    link, str(record.get("published", ""))[:100], collected_at,
                     str(record.get("item_type", "publication"))[:30], str(record.get("author", ""))[:180],
                     str(record.get("community", ""))[:180], max(0, int(record.get("engagement", 0) or 0))))
-                found += cursor.rowcount
-            new_count += found
-            results[label] = f"Добавлено: {found}"
-        except (ValueError, OSError, TypeError) as exc:
-            results[label] = "Ошибка источника: " + str(exc)[:140]
-    if countries:
-        results["news"] = "; ".join(f"{COUNTRIES[code][0]}: {results.get('news:' + code, 'нет данных')}" for code in countries)
-    social_results = [f"telegram: {results.get('telegram', 'нет данных')}"] if telegram_channels else []
-    results["social"] = ("; ".join([f"vk: {results.get('vk', 'нет данных')}", *social_results]) if region else
-                         "; ".join([*(f"{source}: {results.get(source, 'нет данных')}" for source in ("mastodon", "bluesky", "vk")), *social_results]))
+                new_count += cursor.rowcount
+            results["telegram"] = f"Добавлено: {new_count}"
+        except Exception as exc:
+            results["telegram"] = "Ошибка источника: " + str(exc)[:140]
+    results["social"] = f"telegram: {results.get('telegram', 'нет данных')}"
     return new_count, results

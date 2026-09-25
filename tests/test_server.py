@@ -21,6 +21,7 @@ from pptx.util import Inches, Pt
 
 from presentations import deck_from_outline, pptx_bytes, validate_deck
 from reports import analytical_pdf_bytes
+from media_monitor import collect as collect_media
 from server import create_server, init_db, run_media_monitor
 
 
@@ -69,74 +70,56 @@ class PlannerTest(unittest.TestCase):
         workbook.close()
         return base64.b64encode(buffer.getvalue()).decode("ascii")
 
-    def test_media_monitor_collects_deduplicates_exports_and_enforces_roles(self):
+    def test_telegram_media_monitor_collects_deduplicates_exports_and_enforces_roles(self):
         self.assertEqual(self.request(self.admin, "/media")[0], 401)
         self.request(self.admin, "/setup", "POST", {"name": "Админ", "email": "admin@test.org", "password": "secure-pass-123"})
         self.request(self.admin, "/users", "POST", {"name": "Интервьюер", "email": "field@test.org",
             "password": "secure-pass-789", "role": "interviewer"})
         self.request(self.interviewer, "/login", "POST", {"email": "field@test.org", "password": "secure-pass-789"})
         self.assertEqual(self.request(self.interviewer, "/media")[0], 403)
-        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "hashtag": "bad tag"})[0], 400)
-        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "interval_minutes": 1})[0], 400)
-        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "countries": ["XX"]})[0], 400)
-        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "countries": ["RU", "RU"]})[0], 400)
-        status, data = self.request(self.admin, "/media", "POST", {"question": "городские парки", "hashtag": "парки", "countries": ["RU", "US"]})
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема"})[0], 400)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "telegram_channels": ["bad channel!"]})[0], 400)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "telegram_channels": ["@example"], "interval_minutes": 1})[0], 400)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "telegram_channels": ["@example"], "lookback_hours": 0})[0], 400)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема", "telegram_channels": ["@example"], "lookback_hours": 721})[0], 400)
+        status, data = self.request(self.admin, "/media", "POST", {
+            "question": "городские парки", "region": "ЛНР", "telegram_channels": ["@example", "https://t.me/another"],
+            "lookback_hours": 48, "interval_minutes": 60})
         self.assertEqual(status, 201)
         mid = data["id"]
-        many_links = "\n".join(f"https://vk.com/club{i}" for i in range(21))
-        many_status, many_data = self.request(self.admin, "/media", "POST", {
-            "question": "Много сообществ", "region": "Россия", "group_links": many_links, "countries": ["RU"]})
-        self.assertEqual(many_status, 201)
-        self.assertEqual(len(self.request(self.admin, "/media")[1]["monitors"]), 2)
-        self.assertEqual(self.request(self.admin, f"/media/{many_data['id']}")[1]["monitor"]["vk_group_links"],
-                         [f"https://vk.com/club{i}" for i in range(21)])
+        self.assertEqual(len(self.request(self.admin, "/media")[1]["monitors"]), 1)
+        created = self.request(self.admin, f"/media/{mid}")[1]["monitor"]
+        self.assertEqual(created["telegram_channels"], ["@example", "https://t.me/another"])
+        self.assertEqual(created["lookback_hours"], 48)
         self.assertEqual(self.request(self.admin, f"/media/{mid}")[1]["summary"]["total"], 0)
 
-        def fake_fetch(url):
-            if "news.google.com" in url:
-                if "gl=US" in url:
-                    return ("<rss><channel><item><title>US warns Russia after attack</title>"
-                            "<link>https://news.google.com/articles/us</link>"
-                            "<description>US officials discuss a response</description></item></channel></rss>").encode()
-                return ("<rss><channel><item><title>Городские парки развиваются</title>"
-                        "<link>https://news.google.com/articles/test</link>"
-                        "<description>Открытие новых зон</description><pubDate>Mon, 21 Sep 2026 00:00:00 GMT</pubDate>"
-                        "</item></channel></rss>").encode()
-            if "public.api.bsky.app" in url:
-                return json.dumps({"posts": [{"author": {"handle": "test.bsky.social"},
-                    "uri": "at://did:plc:test/app.bsky.feed.post/abc12345",
-                    "record": {"text": "Городские парки открылись", "createdAt": "2026-09-21"}}]}).encode()
-            self.assertIn("mastodon.social", url)
-            return json.dumps([{"content": "<p>Городские парки радуют</p>", "url": "https://mastodon.social/@test/1",
-                                "created_at": "2026-09-21T00:00:00Z"},
-                               {"content": "<p>Другая тема</p>", "url": "https://mastodon.social/@test/2"}]).encode()
+        def fake_telegram(question, region, channels, lookback_hours):
+            self.assertEqual(region, "ЛНР")
+            self.assertEqual(channels, ["@example", "https://t.me/another"])
+            self.assertEqual(lookback_hours, 48)
+            return [{"source": "telegram", "title": "Городские парки обновляют", "excerpt": "Открытие новых зон",
+                     "url": "https://t.me/example/1", "published": "2026-09-21", "item_type": "post",
+                     "community": "Новости региона", "author": "Новости региона", "engagement": 5},
+                    {"source": "telegram", "title": "Нужны парки", "excerpt": "Жители просят больше зелени",
+                     "url": "https://t.me/example/1?comment=7", "published": "2026-09-21", "item_type": "comment",
+                     "community": "Новости региона", "author": "Telegram user", "engagement": 0}]
 
-        with patch("media_monitor.fetch", side_effect=fake_fetch):
-            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]["added"], 4)
+        with patch("server.collect_media", side_effect=lambda db, monitor: collect_media(db, monitor, fetch_telegram=fake_telegram)):
+            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]["added"], 2)
             self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]["added"], 0)
             self.assertFalse(run_media_monitor(self.db_path, mid))  # interval not elapsed
             with closing(sqlite3.connect(self.db_path)) as db, db:
                 db.execute("UPDATE media_monitors SET next_run = '2020-01-01' WHERE id = ?", (mid,))
             self.assertTrue(run_media_monitor(self.db_path, mid))
-        def failing_news(url):
-            if "news.google.com" in url:
-                raise OSError("источник недоступен")
-            return fake_fetch(url)
-        with patch("media_monitor.fetch", side_effect=failing_news):
-            result_status = self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]
-            self.assertIn("Ошибка источника", result_status["news"])
-        self.assertIn("bluesky: Добавлено: 0", result_status["social"])
+
         result = self.request(self.admin, f"/media/{mid}")[1]
-        self.assertEqual((result["summary"]["total"], result["summary"]["news"], result["summary"]["social"]), (4, 2, 2))
-        self.assertEqual(result["monitor"]["countries"], ["RU", "US"])
-        self.assertEqual([c["total"] for c in result["summary"]["countries"]], [1, 1])
-        self.assertEqual(result["summary"]["unassigned_social"], 2)
-        self.assertEqual(result["summary"]["countries"][1]["conflict_mentions"][0]["targets_mentioned"], ["Россия"])
-        self.assertIn("Конфликты и безопасность", [t["name"] for t in result["summary"]["overall"]["themes"]])
+        self.assertEqual((result["summary"]["total"], result["summary"]["telegram"]), (2, 2))
+        self.assertEqual(result["monitor"]["lookback_hours"], 48)
+        self.assertEqual(result["summary"]["communities"], [["Новости региона", 2]])
         csv_data = self.request(self.admin, f"/media/{mid}/export.csv", binary=True)[1].decode("utf-8-sig")
-        self.assertEqual(len(list(csv.reader(io.StringIO(csv_data)))), 5)
-        self.assertEqual(len(json.loads(self.request(self.admin, f"/media/{mid}/export.json", binary=True)[1])["items"]), 4)
-        self.assertIn("Материалов: 4", self.request(self.admin, f"/media/{mid}/export.md", binary=True)[1].decode())
+        self.assertEqual(len(list(csv.reader(io.StringIO(csv_data)))), 3)
+        self.assertEqual(len(json.loads(self.request(self.admin, f"/media/{mid}/export.json", binary=True)[1])["items"]), 2)
+        self.assertIn("Материалов: 2", self.request(self.admin, f"/media/{mid}/export.md", binary=True)[1].decode())
         self.assertEqual(self.request(self.admin, f"/media/{mid}", "PATCH", {"enabled": False})[0], 200)
         self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[0], 409)
         self.assertEqual(self.request(self.admin, f"/media/{mid}", "DELETE")[0], 200)
@@ -161,8 +144,9 @@ class PlannerTest(unittest.TestCase):
             """)
         init_db(path)
         with closing(sqlite3.connect(path)) as db:
-            self.assertEqual(db.execute("SELECT countries FROM media_monitors WHERE id = 1").fetchone()[0], "[]")
+            self.assertEqual(db.execute("SELECT region FROM media_monitors WHERE id = 1").fetchone()[0], "")
             self.assertEqual(db.execute("SELECT telegram_channels FROM media_monitors WHERE id = 1").fetchone()[0], "[]")
+            self.assertEqual(db.execute("SELECT lookback_hours FROM media_monitors WHERE id = 1").fetchone()[0], 24)
             self.assertEqual(db.execute("SELECT country FROM media_items WHERE id = 1").fetchone()[0], "RU")
 
     def test_telegram_endpoints_require_configuration_and_validate_channels(self):
@@ -178,14 +162,16 @@ class PlannerTest(unittest.TestCase):
             self.assertEqual(self.request(self.admin, "/telegram/search", "POST", {"question": "тема", "region": "ЛНР"})[0], 503)
             self.assertEqual(self.request(self.admin, "/telegram/subscribe", "POST", {"channels": []})[0], 400)
         self.assertEqual(self.request(self.admin, "/media", "POST", {
-            "question": "Тема", "region": "ЛНР", "telegram_channels": ["bad channel!"], "countries": ["RU"]})[0], 400)
+            "question": "Тема", "region": "ЛНР", "telegram_channels": ["bad channel!"]})[0], 400)
+        self.assertEqual(self.request(self.admin, "/media", "POST", {"question": "Тема"})[0], 400)
         status, created = self.request(self.admin, "/media", "POST", {
             "question": "Тема", "region": "ЛНР",
             "telegram_channels": ["https://t.me/example", "@another_channel", "https://t.me/example"],
-            "countries": ["RU"]})
+            "lookback_hours": 72})
         self.assertEqual(status, 201)
         monitor = self.request(self.admin, f"/media/{created['id']}")[1]["monitor"]
         self.assertEqual(monitor["telegram_channels"], ["https://t.me/example", "@another_channel"])
+        self.assertEqual(monitor["lookback_hours"], 72)
 
     def test_existing_studies_gain_goal_and_tasks(self):
         path = Path(self.temp.name) / "legacy.db"

@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
-from media_monitor import (AGENTS, COUNTRIES, collect as collect_media, summarize as summarize_media,
+from media_monitor import (AGENTS, collect as collect_media, summarize as summarize_media,
                            telegram_search, telegram_start_auth, telegram_status, telegram_subscribe,
                            telegram_verify)
 from reports import analytical_pdf_bytes, analytical_snapshot, build_member_quotas, build_quotas, build_report, parse_weight, pdf_bytes, read_excel
@@ -204,10 +204,9 @@ def init_db(path):
                 content BLOB NOT NULL, created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS media_monitors (
-                id INTEGER PRIMARY KEY, question TEXT NOT NULL, hashtag TEXT NOT NULL DEFAULT '', vk_query TEXT NOT NULL DEFAULT '',
-                region TEXT NOT NULL DEFAULT '', vk_group_links TEXT NOT NULL DEFAULT '[]', telegram_channels TEXT NOT NULL DEFAULT '[]',
+                id INTEGER PRIMARY KEY, question TEXT NOT NULL, region TEXT NOT NULL DEFAULT '',
+                telegram_channels TEXT NOT NULL DEFAULT '[]', lookback_hours INTEGER NOT NULL DEFAULT 24,
                 ai_report TEXT NOT NULL DEFAULT '',
-                countries TEXT NOT NULL DEFAULT '[]',
                 enabled INTEGER NOT NULL DEFAULT 1, interval_minutes INTEGER NOT NULL DEFAULT 30,
                 next_run TEXT NOT NULL, running_until TEXT, last_run TEXT, last_result TEXT NOT NULL DEFAULT '{}'
             );
@@ -221,19 +220,15 @@ def init_db(path):
             );
             CREATE INDEX IF NOT EXISTS media_items_recent ON media_items(monitor_id, id DESC);
             """)
-            if "countries" not in {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}:
-                db.execute("ALTER TABLE media_monitors ADD COLUMN countries TEXT NOT NULL DEFAULT '[]'")
             monitor_columns = {row["name"] for row in db.execute("PRAGMA table_info(media_monitors)")}
-            if "vk_query" not in monitor_columns:
-                db.execute("ALTER TABLE media_monitors ADD COLUMN vk_query TEXT NOT NULL DEFAULT ''")
             if "region" not in monitor_columns:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN region TEXT NOT NULL DEFAULT ''")
             if "ai_report" not in monitor_columns:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN ai_report TEXT NOT NULL DEFAULT ''")
-            if "vk_group_links" not in monitor_columns:
-                db.execute("ALTER TABLE media_monitors ADD COLUMN vk_group_links TEXT NOT NULL DEFAULT '[]'")
             if "telegram_channels" not in monitor_columns:
                 db.execute("ALTER TABLE media_monitors ADD COLUMN telegram_channels TEXT NOT NULL DEFAULT '[]'")
+            if "lookback_hours" not in monitor_columns:
+                db.execute("ALTER TABLE media_monitors ADD COLUMN lookback_hours INTEGER NOT NULL DEFAULT 24")
             if "country" not in {row["name"] for row in db.execute("PRAGMA table_info(media_items)")}:
                 db.execute("ALTER TABLE media_items ADD COLUMN country TEXT NOT NULL DEFAULT ''")
                 db.execute("UPDATE media_items SET country = 'RU' WHERE source = 'news'")
@@ -312,14 +307,14 @@ def clean_text(value, max_len, required=False):
 
 
 def media_ai_report(question, region, summary, rows):
-    """Turn bounded VK observations into a sourced analyst report."""
+    """Turn bounded Telegram observations into a sourced analyst report."""
     key = deepseek_key()
     evidence = [{"type": row.get("item_type", "publication"), "community": row.get("community", ""),
                  "text": (row.get("title", "") + " " + row.get("excerpt", ""))[:1100],
                  "engagement": row.get("engagement", 0), "url": row.get("url", "")}
                 for row in rows[:120]]
     payload = {"model": "deepseek-chat", "temperature": 0.1, "max_tokens": 5000,
-               "messages": [{"role": "system", "content": "Ты аналитик публичных сообществ VK. Пиши подробный отчёт на русском. Отделяй наблюдения от гипотез, не выдавай тональность сообщества за мнение всего региона, не раскрывай личности пользователей по ID. Каждое существенное утверждение подтверждай ссылкой из evidence. Не придумывай факты, персоны или события."},
+               "messages": [{"role": "system", "content": "Ты аналитик публичных Telegram-каналов. Пиши подробный отчёт на русском. Отделяй наблюдения от гипотез, не выдавай тональность канала за мнение всего региона, не раскрывай личности пользователей. Каждое существенное утверждение подтверждай ссылкой из evidence. Не придумывай факты, персоны или события."},
                             {"role": "user", "content": json.dumps({"question": question, "region": region, "summary": summary, "evidence": evidence}, ensure_ascii=False)}]}
     return deepseek_answer(payload, key, timeout=120, max_bytes=131072)
 
@@ -392,16 +387,15 @@ def run_media_monitor(path, monitor_id, force=False):
                            (monitor_id, monitor_id))
                 rows = [dict(item) for item in db.execute("""SELECT id, source, country, title, excerpt, url, published,
                     item_type, author, community, engagement FROM media_items WHERE monitor_id = ? ORDER BY id DESC""", (monitor_id,))]
-                summary = summarize_media(rows, json.loads(monitor["countries"]) or ["RU"])
+                summary = summarize_media(rows)
                 results["added"] = added
                 results["summary"] = summary
-                if monitor.get("region"):
-                    try:
-                        report = media_ai_report(monitor["question"], monitor["region"], summary, rows)
-                        db.execute("UPDATE media_monitors SET ai_report = ? WHERE id = ?", (report, monitor_id))
-                        results["ai_report"] = "Сформирован"
-                    except (ApiError, OSError, ValueError, TypeError) as exc:
-                        results["ai_report"] = "Не сформирован: " + str(exc)[:180]
+                try:
+                    report = media_ai_report(monitor["question"], monitor["region"], summary, rows)
+                    db.execute("UPDATE media_monitors SET ai_report = ? WHERE id = ?", (report, monitor_id))
+                    results["ai_report"] = "Сформирован"
+                except (ApiError, OSError, ValueError, TypeError) as exc:
+                    results["ai_report"] = "Не сформирован: " + str(exc)[:180]
                 db.execute("""UPDATE media_monitors SET running_until = NULL, last_run = ?, next_run = ?, last_result = ?
                     WHERE id = ?""", (now(), (datetime.now(timezone.utc) + timedelta(minutes=monitor["interval_minutes"])).isoformat(timespec="seconds"),
                                       json.dumps(results, ensure_ascii=False), monitor_id))
@@ -1552,41 +1546,26 @@ class Handler(BaseHTTPRequestHandler):
                 monitors = [dict(row) for row in db.execute("SELECT * FROM media_monitors ORDER BY id DESC")]
                 for monitor in monitors:
                     monitor["last_result"] = json.loads(monitor["last_result"])
-                for monitor in monitors:
-                    monitor["countries"] = json.loads(monitor["countries"])
-                    monitor["vk_group_links"] = json.loads(monitor.get("vk_group_links") or "[]")
                     monitor["telegram_channels"] = json.loads(monitor.get("telegram_channels") or "[]")
-                self.send_json(200, {"monitors": monitors, "agents": AGENTS,
-                                     "available_countries": [{"code": code, "name": info[0]} for code, info in COUNTRIES.items()]})
+                self.send_json(200, {"monitors": monitors, "agents": AGENTS})
                 return
             if method == "POST":
                 data = self.read_json()
                 question = clean_text(data.get("question", ""), 240, True)
                 region = clean_text(data.get("region", ""), 180, False)
-                raw_links = data.get("group_links", "")
-                if not isinstance(raw_links, str):
-                    raise ApiError(400, "Ссылки на группы должны быть текстом")
-                group_links = [link.strip() for link in raw_links.splitlines() if link.strip()]
-                if any(not re.fullmatch(r"https?://(?:www\.)?(?:vk\.com|vk\.ru)/(?:club|public|group)?/?[A-Za-z0-9_.-]+/?(?:\?[A-Za-z0-9_.=&%-]+)?", link, re.I) for link in group_links):
-                    raise ApiError(400, "Укажите корректные ссылки на группы VK, по одной на строку")
                 telegram_channels = self.telegram_channels(data)
-                hashtag = data.get("hashtag", "")
-                if not isinstance(hashtag, str) or not re.fullmatch(r"#?[\wа-яА-ЯёЁ]{0,60}", hashtag):
-                    raise ApiError(400, "Укажите один хэштег без пробелов или оставьте поле пустым")
-                hashtag = hashtag.lstrip("#")
+                if not telegram_channels:
+                    raise ApiError(400, "Выберите хотя бы один Telegram-канал")
+                lookback = data.get("lookback_hours", 24)
+                if type(lookback) is not int or not 1 <= lookback <= 720:
+                    raise ApiError(400, "Период сбора: от 1 до 720 часов")
                 interval = data.get("interval_minutes", 30)
                 if type(interval) is not int or not 15 <= interval <= 1440:
                     raise ApiError(400, "Интервал: от 15 до 1440 минут")
-                global_mode = data.get("global") is True
-                countries = list(COUNTRIES) if global_mode else data.get("countries", [])
-                vk_query = clean_text(data.get("vk_query", question), 240, True)
-                if not isinstance(countries, list) or not 1 <= len(countries) <= len(COUNTRIES) or any(
-                        not isinstance(code, str) or code not in COUNTRIES for code in countries) or len(set(countries)) != len(countries):
-                    raise ApiError(400, f"Выберите от 1 до {len(COUNTRIES)} разных стран из списка")
                 cursor = db.execute("""INSERT INTO media_monitors
-                    (question, hashtag, vk_query, region, vk_group_links, telegram_channels, countries, interval_minutes, next_run)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (question, hashtag, vk_query, region, json.dumps(group_links, ensure_ascii=False), json.dumps(telegram_channels, ensure_ascii=False), json.dumps(countries), interval, now()))
+                    (question, region, telegram_channels, lookback_hours, interval_minutes, next_run)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (question, region, json.dumps(telegram_channels, ensure_ascii=False), lookback, interval, now()))
                 self.send_json(201, {"id": cursor.lastrowid})
                 return
             raise ApiError(405, "Метод не поддерживается")
@@ -1619,12 +1598,10 @@ class Handler(BaseHTTPRequestHandler):
             rows = [dict(item) for item in db.execute("""SELECT id, source, country, title, excerpt, url, published, collected_at,
                 item_type, author, community, engagement
                 FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000""", (monitor_id,))]
-            selected = json.loads(row["countries"])
-            monitor = {**dict(row), "countries": selected,
-                       "vk_group_links": json.loads(row["vk_group_links"] or "[]"),
+            monitor = {**dict(row),
                        "telegram_channels": json.loads(row["telegram_channels"] or "[]"),
                        "last_result": json.loads(row["last_result"])}
-            summary = summarize_media(rows, selected or ["RU"])
+            summary = summarize_media(rows)
             if action is None or action == "export.json":
                 result = {"monitor": monitor,
                           "summary": summary, "items": rows, "agents": AGENTS}
@@ -1644,19 +1621,19 @@ class Handler(BaseHTTPRequestHandler):
                                 {"Content-Disposition": f"attachment; filename=media-{monitor_id}.csv"})
                 return
             if action == "export.md":
-                lines = [f"# Медиаанализ: {row['question']}", "", f"Материалов: {summary['total']}; СМИ: {summary['news']}; соцсети: {summary['social']}.",
+                conflicts = ", ".join(f"{item['kind']}: " +
+                    (f"{item['direction']['actor_mentioned']} → {item['direction']['target_mentioned']}" if item["direction"] else
+                     f"упомянуты {', '.join(item['targets_mentioned'])}; направление не определено") +
+                    f" ({item['url']})" for item in summary["overall"]["conflict_mentions"])
+                lines = [f"# Медиаанализ Telegram: {row['question']}", "",
+                         f"Материалов: {summary['total']}; Telegram: {summary['telegram']}.",
                          "", "Частые слова в заголовках: " + ", ".join(f"{term['word']} ({term['count']})" for term in summary["terms"]),
                          "", "Общая сводка: " + summary["overall"]["description"],
-                         "Чаще в последних материалах: " + ", ".join(t["word"] for t in summary["overall"]["trending_terms"]), ""]
-                for country in summary["countries"]:
-                    lines.extend([f"### {country['name']}", country["description"],
-                                  "Упоминания конфликтов: " + ", ".join(f"{item['kind']}: " +
-                                      (f"{item['direction']['actor_mentioned']} → {item['direction']['target_mentioned']}" if item["direction"] else
-                                       f"упомянуты {', '.join(item['targets_mentioned'])}; направление не определено") +
-                                      f" ({item['url']})" for item in country["conflict_mentions"]), ""])
+                         "Чаще в последних материалах: " + ", ".join(t["word"] for t in summary["overall"]["trending_terms"]), "",
+                         "Упоминания конфликтов и ответных действий: " + (conflicts or "не найдено"), ""]
                 for item in rows:
-                    lines.extend([f"## {item['source']} [{item['country']}]: {item['title'].replace(chr(10), ' ')}", item["published"],
-                                  item["excerpt"], item["url"], ""])
+                    lines.extend([f"## {item['source']} ({item['item_type']}): {item['title'].replace(chr(10), ' ')}",
+                                  item["published"], item["excerpt"], item["url"], ""])
                 self.send_bytes(200, "\n".join(lines).encode("utf-8"), "text/markdown; charset=utf-8",
                                 {"Content-Disposition": f"attachment; filename=media-{monitor_id}.md"})
                 return
