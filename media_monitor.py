@@ -101,9 +101,29 @@ def telegram_proxy():
     return proxy
 
 
+def telegram_mtproto():
+    """Optional Telegram MTProto transport."""
+    host = os.environ.get("TELEGRAM_MTPROTO_HOST", "").strip()
+    port = os.environ.get("TELEGRAM_MTPROTO_PORT", "").strip()
+    secret = os.environ.get("TELEGRAM_MTPROTO_SECRET", "").strip()
+    if not host and not port and not secret:
+        return None
+    if not host or not port or not secret or any(char.isspace() for char in host + secret):
+        raise ValueError("Укажите TELEGRAM_MTPROTO_HOST, TELEGRAM_MTPROTO_PORT и TELEGRAM_MTPROTO_SECRET")
+    try:
+        port_number = int(port)
+    except ValueError as exc:
+        raise ValueError("TELEGRAM_MTPROTO_PORT должен быть числом от 1 до 65535") from exc
+    if not 1 <= port_number <= 65535:
+        raise ValueError("TELEGRAM_MTPROTO_PORT должен быть числом от 1 до 65535")
+    if not re.fullmatch(r"[0-9a-fA-F]{32,64}", secret):
+        raise ValueError("TELEGRAM_MTPROTO_SECRET должен быть hex-секретом")
+    return host, port_number, secret.lower()
+
+
 def _telegram_client():
     try:
-        from telethon import TelegramClient
+        from telethon import TelegramClient, connection
     except ImportError as exc:
         raise ValueError("Telethon не установлен. Добавьте зависимость telethon") from exc
     if not telegram_configured():
@@ -114,8 +134,16 @@ def _telegram_client():
         raise ValueError("TELEGRAM_API_ID должен быть числом") from exc
     session = os.environ.get("TELEGRAM_SESSION", "").strip() or telegram_session_name()
     Path(session).parent.mkdir(parents=True, exist_ok=True)
+    mtproto = telegram_mtproto()
     proxy = telegram_proxy()
-    return TelegramClient(session, api_id, os.environ["TELEGRAM_API_HASH"].strip(), **({"proxy": proxy} if proxy else {}))
+    if mtproto and proxy:
+        raise ValueError("Задайте только один тип Telegram-прокси: MTProto или SOCKS5")
+    options = {}
+    if mtproto:
+        options.update({"connection": connection.ConnectionTcpMTProxyRandomizedIntermediate, "proxy": mtproto})
+    elif proxy:
+        options["proxy"] = proxy
+    return TelegramClient(session, api_id, os.environ["TELEGRAM_API_HASH"].strip(), **options)
 
 
 def _telegram_run(operation):

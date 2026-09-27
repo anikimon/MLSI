@@ -78,6 +78,24 @@ class SummaryTest(unittest.TestCase):
                         media_monitor.telegram_proxy()
                 self.assertNotIn("secret", str(error.exception))
 
+    def test_telegram_client_uses_mtproto_proxy(self):
+        settings = {"TELEGRAM_API_ID": "12345", "TELEGRAM_API_HASH": "test-hash",
+                    "TELEGRAM_MTPROTO_HOST": "mtproxy.example.org", "TELEGRAM_MTPROTO_PORT": "443",
+                    "TELEGRAM_MTPROTO_SECRET": "0123456789abcdef0123456789abcdef"}
+        with patch("telethon.TelegramClient") as client, patch.dict(os.environ, settings):
+            media_monitor._telegram_client()
+        self.assertEqual(client.call_args.kwargs["proxy"], (
+            "mtproxy.example.org", 443, "0123456789abcdef0123456789abcdef"))
+        self.assertIn("MTProxy", client.call_args.kwargs["connection"].__name__)
+
+    def test_telegram_proxy_types_cannot_be_combined(self):
+        settings = {"TELEGRAM_PROXY_HOST": "proxy.example.org", "TELEGRAM_PROXY_PORT": "1080",
+                    "TELEGRAM_MTPROTO_HOST": "mtproxy.example.org", "TELEGRAM_MTPROTO_PORT": "443",
+                    "TELEGRAM_MTPROTO_SECRET": "0123456789abcdef0123456789abcdef"}
+        with patch.dict(os.environ, settings):
+            with self.assertRaises(ValueError):
+                media_monitor._telegram_client()
+
     def test_telegram_status_does_not_block_when_collector_is_busy(self):
         with patch.dict(media_monitor.os.environ, {"TELEGRAM_API_ID": "123", "TELEGRAM_API_HASH": "placeholder"}):
             with media_monitor.TELEGRAM_LOCK:
