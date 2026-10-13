@@ -1,0 +1,22 @@
+[Unit]
+Description=MLSI embeddings service (fastembed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mlsi
+Group=mlsi
+Environment=HF_ENDPOINT=https://hf-mirror.com
+Environment=FASTEMBED_CACHE_PATH=/srv/mlsi/models/fastembed
+Environment=HF_HOME=/srv/mlsi/models
+Environment=EMB_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+Environment=EMB_HOST=127.0.0.1
+Environment=EMB_PORT=8091
+ExecStart=/srv/mlsi/app/.venv/bin/python /srv/mlsi/embeddings/emb_server.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
