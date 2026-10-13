@@ -274,30 +274,34 @@ async def _telegram_search(question, region=""):
         if not candidates and errors:
             raise ValueError("Telegram не ответил на поиск. Повторите запрос через минуту")
         keyword_set = set(keywords)
-        results = []
-        for chat in list(candidates.values())[:40]:
+        semaphore = asyncio.Semaphore(6)
+
+        async def enrich(chat):
             username = chat.username
             title = getattr(chat, "title", username) or username
             members = getattr(chat, "participants_count", None)
             about = ""
             linked_chat_id = getattr(chat, "linked_chat_id", None)
-            try:
-                full = await client(functions.channels.GetFullChannelRequest(channel=chat))
-                full_chat = full.full_chat
-                about = clean_markup(getattr(full_chat, "about", "") or "")
-                members = getattr(full_chat, "participants_count", None) or members
-                linked_chat_id = getattr(full_chat, "linked_chat_id", None) or linked_chat_id
-            except Exception:
-                pass
+            async with semaphore:
+                try:
+                    full = await client(functions.channels.GetFullChannelRequest(channel=chat))
+                    full_chat = full.full_chat
+                    about = clean_markup(getattr(full_chat, "about", "") or "")
+                    members = getattr(full_chat, "participants_count", None) or members
+                    linked_chat_id = getattr(full_chat, "linked_chat_id", None) or linked_chat_id
+                except Exception:
+                    pass
             haystack = (title + " " + username + " " + about).lower()
             relevance = sum(3 for keyword in keyword_set if keyword in haystack)
             if region_text and region_text.lower() in haystack:
                 relevance += 3
             if _has_cyrillic(title + about):
                 relevance += 2
-            results.append({"username": username, "title": title, "link": f"https://t.me/{username}",
-                            "members": members, "about": about[:400], "has_comments": bool(linked_chat_id),
-                            "relevance": relevance})
+            return {"username": username, "title": title, "link": f"https://t.me/{username}",
+                    "members": members, "about": about[:400], "has_comments": bool(linked_chat_id),
+                    "relevance": relevance}
+
+        results = await asyncio.gather(*(enrich(chat) for chat in list(candidates.values())[:30]))
         ranked = sorted(results, key=lambda row: (row["relevance"], row["members"] or 0), reverse=True)
         return ranked[:20]
     finally:
