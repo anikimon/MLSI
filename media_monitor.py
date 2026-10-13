@@ -257,10 +257,12 @@ async def _telegram_search(question, region=""):
             if candidate and candidate not in queries:
                 queries.append(candidate)
         candidates = {}
+        errors = 0
         for query in queries[:8]:
             try:
                 result = await client(functions.contacts.SearchRequest(q=query, limit=20))
             except Exception:
+                errors += 1
                 continue
             for chat in result.chats:
                 if not isinstance(chat, (types.Channel, types.Chat)):
@@ -269,6 +271,8 @@ async def _telegram_search(question, region=""):
                 if not username or not getattr(chat, "broadcast", False):
                     continue
                 candidates.setdefault(username.lower(), chat)
+        if not candidates and errors:
+            raise ValueError("Telegram не ответил на поиск. Повторите запрос через минуту")
         keyword_set = set(keywords)
         results = []
         for chat in list(candidates.values())[:40]:

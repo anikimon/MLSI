@@ -75,6 +75,17 @@ async def _pipe_down(ws, writer):
             pass
 
 
+async def _open_worker(url):
+    last_error = None
+    for attempt in range(3):
+        try:
+            return await websockets.connect(url, max_size=None, ping_interval=20, ping_timeout=20, open_timeout=30)
+        except Exception as exc:
+            last_error = exc
+            await asyncio.sleep(0.5 * (attempt + 1))
+    raise last_error
+
+
 async def handle(reader, writer):
     peer = writer.get_extra_info("peername")
     try:
@@ -85,7 +96,7 @@ async def handle(reader, writer):
         host, port = target
         url = f"{WORKER_URL}/?token={TOKEN}&host={host}&port={port}"
         try:
-            ws = await websockets.connect(url, max_size=None, ping_interval=20, ping_timeout=20, open_timeout=20)
+            ws = await _open_worker(url)
         except Exception as exc:
             log.warning("worker connect failed for %s:%s: %s", host, port, exc)
             writer.write(b"\x05\x01\x00\x01" + b"\x00" * 6)
