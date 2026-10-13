@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 from array import array
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -217,7 +218,7 @@ def ensure_session_vectors(path, session_id):
 
 
 def semantic_evidence(db, sources, question, guide, history, limit=12):
-    """Embedding-based retrieval; returns ranked rows or None when vectors are unavailable."""
+    """Hybrid retrieval: embedding cosine + lexical (rare-term) score; None when vectors are unavailable."""
     vectors = load_source_vectors(db, [row["id"] for row in sources])
     if len(vectors) < min(len(sources), 10):
         return None
@@ -236,8 +237,25 @@ def semantic_evidence(db, sources, question, guide, history, limit=12):
             norm += b * b
         return dot / (qnorm * (math.sqrt(norm) or 1.0))
 
-    ranked = sorted((row for row in sources if row["id"] in vectors),
-                    key=lambda row: cosine(vectors[row["id"]]), reverse=True)
+    def tokenize(text):
+        return set(re.findall(r"[\wа-яё]{4,}", str(text or "").lower()))
+
+    query_terms = tokenize(query)
+    frequency = Counter(word for row in sources for word in tokenize(row["body"]))
+    lexical = {row["id"]: sum(1.0 / (1 + frequency[word]) for word in query_terms & tokenize(row["body"]))
+               for row in sources}
+    max_lexical = max(lexical.values()) or 1.0
+    cosines = {row["id"]: cosine(vectors[row["id"]]) for row in sources if row["id"] in vectors}
+    max_cosine = max(cosines.values()) if cosines else 1.0
+    min_cosine = min(cosines.values()) if cosines else 0.0
+    span = (max_cosine - min_cosine) or 1.0
+
+    def score(row):
+        lexical_score = lexical.get(row["id"], 0.0) / max_lexical
+        cosine_score = (cosines.get(row["id"], min_cosine) - min_cosine) / span
+        return 0.5 * lexical_score + 0.5 * cosine_score
+
+    ranked = sorted((row for row in sources if row["id"] in cosines), key=score, reverse=True)
     return ranked[:limit]
 
 
