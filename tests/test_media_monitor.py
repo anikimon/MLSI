@@ -20,13 +20,19 @@ class FakeEntity:
     username = "example"
 
 
+class FakeReplies:
+    def __init__(self, count):
+        self.replies = count
+
+
 class FakeMessage:
-    def __init__(self, message_id, date, text, views=0, forwards=0):
+    def __init__(self, message_id, date, text, views=0, forwards=0, replies=None):
         self.id = message_id
         self.date = date
         self.message = text
         self.views = views
         self.forwards = forwards
+        self.replies = replies
 
 
 class FakeClient:
@@ -150,7 +156,7 @@ class SummaryTest(unittest.TestCase):
 
     def test_telegram_agent_collects_comments_in_window(self):
         now = datetime.now(timezone.utc)
-        messages = [FakeMessage(5, now, "Пост с обсуждением")]
+        messages = [FakeMessage(5, now, "Пост с обсуждением", replies=FakeReplies(2))]
         comments = [FakeMessage(11, now - timedelta(hours=1), "Комментарий по теме"),
                     FakeMessage(10, now - timedelta(hours=30), "Старый комментарий")]
         client = FakeClient(messages, comments)

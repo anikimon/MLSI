@@ -331,7 +331,7 @@ def clean_text(value, max_len, required=False):
 def telegram_comment_sources(db, monitor_id):
     """Use only Telegram comments with canonical public links as grounded sources."""
     rows = db.execute("""SELECT url, title, excerpt FROM media_items WHERE monitor_id = ?
-        AND source = 'telegram' AND item_type = 'comment' ORDER BY id DESC LIMIT 2000""", (monitor_id,))
+        AND source = 'telegram' AND item_type = 'comment' ORDER BY id DESC LIMIT 10000""", (monitor_id,))
     return [(row["url"], (row["excerpt"] or row["title"]).strip()[:1200]) for row in rows
             if re.fullmatch(r"https://t\.me/[A-Za-z0-9_]+/\d+\?comment=\d+", row["url"])
             and (row["excerpt"] or row["title"]).strip()]
@@ -414,7 +414,7 @@ def run_media_monitor(path, monitor_id, force=False):
             with db:
                 added, results = collect_media(db, monitor)
                 db.execute("""DELETE FROM media_items WHERE monitor_id = ? AND id NOT IN
-                    (SELECT id FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 2000)""",
+                    (SELECT id FROM media_items WHERE monitor_id = ? ORDER BY id DESC LIMIT 20000)""",
                            (monitor_id, monitor_id))
                 rows = [dict(item) for item in db.execute("""SELECT id, source, country, title, excerpt, url, published,
                     item_type, author, community, engagement FROM media_items WHERE monitor_id = ? ORDER BY id DESC""", (monitor_id,))]

@@ -15,6 +15,9 @@ from threading import Lock
 AGENTS = ("Telegram · публичные каналы", "Telegram · посты", "Telegram · комментарии", "Аналитик · тональность и тренды", "ИИ · подробный аналитический отчёт")
 DEFAULT_LOOKBACK_HOURS = 24
 MAX_LOOKBACK_HOURS = 720
+MAX_POSTS_PER_CHANNEL = 1500
+MAX_COMMENTS_PER_POST = 200
+MAX_COLLECTED_RECORDS = 8000
 TELEGRAM_LOCK = Lock()
 TELEGRAM_AUTH = {}
 ROOT = Path(__file__).resolve().parent
@@ -232,30 +235,67 @@ def _telegram_username(value):
     return path[0].lstrip("@").split("?")[0]
 
 
+def _search_keywords(text):
+    words = re.findall(r"[\wа-яё]{4,}", str(text or "").lower())
+    return [word for word in dict.fromkeys(words) if word not in STOP and not word.isdigit()]
+
+
+def _has_cyrillic(text):
+    return bool(re.search(r"[а-яё]", str(text or "").lower()))
+
+
 async def _telegram_search(question, region=""):
     client = _telegram_client()
     await client.connect()
     try:
         from telethon import functions, types
+        keywords = _search_keywords(question)
+        region_text = str(region or "").strip()
         queries = []
-        for query in (question, region, f"{question} {region}"):
-            query = str(query or "").strip()
-            if query and query not in queries:
-                queries.append(query)
+        for candidate in ([region_text] if region_text else []) + keywords + [str(question or "").strip()]:
+            candidate = candidate.strip()
+            if candidate and candidate not in queries:
+                queries.append(candidate)
         candidates = {}
-        for query in queries:
-            result = await client(functions.contacts.SearchRequest(q=query, limit=20))
+        for query in queries[:8]:
+            try:
+                result = await client(functions.contacts.SearchRequest(q=query, limit=20))
+            except Exception:
+                continue
             for chat in result.chats:
                 if not isinstance(chat, (types.Channel, types.Chat)):
                     continue
-                username = getattr(chat, "username", "")
-                if not username or not getattr(chat, "broadcast", True):
+                username = getattr(chat, "username", "") or ""
+                if not username or not getattr(chat, "broadcast", False):
                     continue
-                candidates[username.lower()] = {"username": username, "title": getattr(chat, "title", username),
-                    "link": f"https://t.me/{username}", "members": getattr(chat, "participants_count", None)}
-            if len(candidates) >= 20:
-                break
-        return list(candidates.values())[:20]
+                candidates.setdefault(username.lower(), chat)
+        keyword_set = set(keywords)
+        results = []
+        for chat in list(candidates.values())[:40]:
+            username = chat.username
+            title = getattr(chat, "title", username) or username
+            members = getattr(chat, "participants_count", None)
+            about = ""
+            linked_chat_id = getattr(chat, "linked_chat_id", None)
+            try:
+                full = await client(functions.channels.GetFullChannelRequest(channel=chat))
+                full_chat = full.full_chat
+                about = clean_markup(getattr(full_chat, "about", "") or "")
+                members = getattr(full_chat, "participants_count", None) or members
+                linked_chat_id = getattr(full_chat, "linked_chat_id", None) or linked_chat_id
+            except Exception:
+                pass
+            haystack = (title + " " + username + " " + about).lower()
+            relevance = sum(3 for keyword in keyword_set if keyword in haystack)
+            if region_text and region_text.lower() in haystack:
+                relevance += 3
+            if _has_cyrillic(title + about):
+                relevance += 2
+            results.append({"username": username, "title": title, "link": f"https://t.me/{username}",
+                            "members": members, "about": about[:400], "has_comments": bool(linked_chat_id),
+                            "relevance": relevance})
+        ranked = sorted(results, key=lambda row: (row["relevance"], row["members"] or 0), reverse=True)
+        return ranked[:20]
     finally:
         await client.disconnect()
 
@@ -317,10 +357,14 @@ async def _telegram_agent(question, region="", channels=(), lookback_hours=DEFAU
                 continue
             title = clean_markup(getattr(entity, "title", username))[:180]
             public_name = getattr(entity, "username", None) or username
-            async for message in client.iter_messages(entity, limit=200):
+            scanned = 0
+            async for message in client.iter_messages(entity):
+                if scanned >= MAX_POSTS_PER_CHANNEL:
+                    break
                 message_date = _message_date(getattr(message, "date", None))
                 if message_date and message_date < cutoff:
                     break
+                scanned += 1
                 text = clean_markup(getattr(message, "message", ""))[:900]
                 message_id = getattr(message, "id", 0)
                 if not text or not message_id:
@@ -330,8 +374,13 @@ async def _telegram_agent(question, region="", channels=(), lookback_hours=DEFAU
                                 "published": str(getattr(message, "date", ""))[:100], "item_type": "post",
                                 "community": title, "region": region[:180], "author": title,
                                 "engagement": int(getattr(message, "views", 0) or 0) + int(getattr(message, "forwards", 0) or 0)})
+                replies = getattr(message, "replies", None)
+                comment_count = int(getattr(replies, "replies", 0) or 0) if replies is not None else 0
+                if comment_count <= 0:
+                    continue
                 try:
-                    async for comment in client.iter_messages(entity, reply_to=message_id, limit=100):
+                    async for comment in client.iter_messages(entity, reply_to=message_id,
+                                                               limit=min(comment_count, MAX_COMMENTS_PER_POST)):
                         comment_date = _message_date(getattr(comment, "date", None))
                         if comment_date and comment_date < cutoff:
                             break
@@ -466,7 +515,7 @@ def collect(db, monitor, fetch_telegram=telegram_agent):
             if not isinstance(records, list):
                 raise ValueError("Источник вернул некорректный список")
             collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            for record in records[:500]:
+            for record in records[:MAX_COLLECTED_RECORDS]:
                 if not isinstance(record, dict):
                     continue
                 link = safe_url(record.get("url"))
