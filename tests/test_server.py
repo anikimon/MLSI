@@ -186,9 +186,24 @@ class PlannerTest(unittest.TestCase):
                      "url": "https://t.me/example/1?comment=7", "published": "2026-09-21", "item_type": "comment",
                      "community": "Новости региона", "author": "Telegram user", "engagement": 0}]
 
+        def wait_media(monitor_id, timeout=10):
+            import time as _time
+            deadline = _time.time() + timeout
+            while _time.time() < deadline:
+                with closing(sqlite3.connect(self.db_path)) as db:
+                    row = db.execute("SELECT running_until FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone()
+                if row and not row[0]:
+                    return
+                _time.sleep(0.05)
+            self.fail("media monitor did not finish in time")
+
         with patch("server.collect_media", side_effect=lambda db, monitor: collect_media(db, monitor, fetch_telegram=fake_telegram)):
-            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]["added"], 2)
-            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[1]["result"]["added"], 0)
+            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[0], 202)
+            wait_media(mid)
+            self.assertEqual(self.request(self.admin, f"/media/{mid}")[1]["monitor"]["last_result"]["added"], 2)
+            self.assertEqual(self.request(self.admin, f"/media/{mid}/run", "POST", {})[0], 202)
+            wait_media(mid)
+            self.assertEqual(self.request(self.admin, f"/media/{mid}")[1]["monitor"]["last_result"]["added"], 0)
             self.assertFalse(run_media_monitor(self.db_path, mid))  # interval not elapsed
             with closing(sqlite3.connect(self.db_path)) as db, db:
                 db.execute("UPDATE media_monitors SET next_run = '2020-01-01' WHERE id = ?", (mid,))

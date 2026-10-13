@@ -354,6 +354,7 @@ async def _telegram_agent(question, region="", channels=(), lookback_hours=DEFAU
     client = _telegram_client()
     await client.connect()
     records = []
+    comment_jobs = []
     try:
         for raw in channels:
             username = _telegram_username(raw)
@@ -384,24 +385,34 @@ async def _telegram_agent(question, region="", channels=(), lookback_hours=DEFAU
                                 "engagement": int(getattr(message, "views", 0) or 0) + int(getattr(message, "forwards", 0) or 0)})
                 replies = getattr(message, "replies", None)
                 comment_count = int(getattr(replies, "replies", 0) or 0) if replies is not None else 0
-                if comment_count <= 0:
-                    continue
-                try:
-                    async for comment in client.iter_messages(entity, reply_to=message_id,
-                                                               limit=min(comment_count, MAX_COMMENTS_PER_POST)):
-                        comment_date = _message_date(getattr(comment, "date", None))
-                        if comment_date and comment_date < cutoff:
-                            break
-                        comment_text = clean_markup(getattr(comment, "message", ""))[:900]
-                        comment_id = getattr(comment, "id", 0)
-                        if comment_text and comment_id:
-                            records.append({"source": "telegram", "title": comment_text[:180], "excerpt": comment_text,
-                                            "url": url + "?comment=" + str(comment_id),
-                                            "published": str(getattr(comment, "date", ""))[:100], "item_type": "comment",
-                                            "community": title, "region": region[:180], "author": "Telegram user",
-                                            "engagement": int(getattr(comment, "views", 0) or 0)})
-                except Exception:
-                    continue
+                if comment_count > 0:
+                    comment_jobs.append((entity, message_id, url, title, comment_count))
+        if comment_jobs:
+            semaphore = asyncio.Semaphore(8)
+
+            async def fetch_comments(entity, message_id, url, title, comment_count):
+                found = []
+                async with semaphore:
+                    try:
+                        async for comment in client.iter_messages(entity, reply_to=message_id,
+                                                                   limit=min(comment_count, MAX_COMMENTS_PER_POST)):
+                            comment_date = _message_date(getattr(comment, "date", None))
+                            if comment_date and comment_date < cutoff:
+                                break
+                            comment_text = clean_markup(getattr(comment, "message", ""))[:900]
+                            comment_id = getattr(comment, "id", 0)
+                            if comment_text and comment_id:
+                                found.append({"source": "telegram", "title": comment_text[:180], "excerpt": comment_text,
+                                              "url": url + "?comment=" + str(comment_id),
+                                              "published": str(getattr(comment, "date", ""))[:100], "item_type": "comment",
+                                              "community": title, "region": region[:180], "author": "Telegram user",
+                                              "engagement": int(getattr(comment, "views", 0) or 0)})
+                    except Exception:
+                        pass
+                return found
+
+            for group in await asyncio.gather(*(fetch_comments(*job) for job in comment_jobs)):
+                records.extend(group)
     finally:
         await client.disconnect()
     return records

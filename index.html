@@ -526,7 +526,21 @@
         box.insertAdjacentHTML('afterbegin', `<section class="media-entry"><strong>Социальный анализ Telegram</strong><p>Тональность: положительная ${summary.sentiment?.positive || 0} · нейтральная ${summary.sentiment?.neutral || 0} · негативная ${summary.sentiment?.negative || 0}.</p><p>Страхи, потребности и недовольство: ${(summary.social_analysis || []).map(item => `${esc(item.name)} (${item.count})`).join(', ') || 'данных пока недостаточно'}.</p><p class="muted">Каналы: ${communities}.</p></section>${monitor.ai_report ? `<section class="media-entry"><strong>Подробный отчёт ИИ</strong><div class="analytical-body">${esc(monitor.ai_report).replace(/\n/g,'<br>')}</div></section>` : ''}`);
         box.querySelector('#media-run').onclick = async event => {
           const button = event.currentTarget; button.disabled = true;
-          try { await api(`/media/${id}/run`,'POST',{}); await loadMediaDetail(id); notify('Проверка завершена'); }
+          try {
+            await api(`/media/${id}/run`,'POST',{});
+            notify('Сбор запущен — это занимает до минуты.');
+            let tries = 0;
+            const poll = setInterval(async () => {
+              tries += 1;
+              try {
+                const fresh = await api(`/media/${id}`);
+                if (!fresh.monitor.running_until || new Date(fresh.monitor.running_until) <= new Date()) {
+                  clearInterval(poll); button.disabled = false; await loadMediaDetail(id); notify('Проверка завершена');
+                }
+              } catch {}
+              if (tries >= 30) { clearInterval(poll); button.disabled = false; }
+            }, 8000);
+          }
           catch (error) { notify(error.message,true); button.disabled = false; }
         };
         box.querySelector('#media-toggle').onclick = async () => { try { await api(`/media/${id}`,'PATCH',{enabled:!monitor.enabled}); await loadMedia(); } catch (error) { notify(error.message,true); } };

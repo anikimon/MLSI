@@ -440,19 +440,10 @@ def normalize_answers(questions, answers):
     return normalized
 
 
-def run_media_monitor(path, monitor_id, force=False):
+def _media_monitor_body(path, monitor_id):
     db = connect(path)
     try:
-        with db:
-            db.execute("BEGIN IMMEDIATE")
-            moment = now()
-            cursor = db.execute("""UPDATE media_monitors SET running_until = ?
-                WHERE id = ? AND enabled = 1 AND (running_until IS NULL OR running_until < ?)
-                AND (? = 1 OR next_run <= ?)""", ((datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat(timespec="seconds"),
-                                                    monitor_id, moment, int(force), moment))
-            if not cursor.rowcount:
-                return False
-            monitor = dict(db.execute("SELECT * FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone())
+        monitor = dict(db.execute("SELECT * FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone())
         try:
             with db:
                 added, results = collect_media(db, monitor)
@@ -478,9 +469,44 @@ def run_media_monitor(path, monitor_id, force=False):
                 db.execute("UPDATE media_monitors SET running_until = NULL, next_run = ? WHERE id = ?",
                            ((datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(timespec="seconds"), monitor_id))
             raise
-        return True
     finally:
         db.close()
+
+
+def _claim_media_monitor(path, monitor_id, force):
+    db = connect(path)
+    try:
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            moment = now()
+            cursor = db.execute("""UPDATE media_monitors SET running_until = ?
+                WHERE id = ? AND enabled = 1 AND (running_until IS NULL OR running_until < ?)
+                AND (? = 1 OR next_run <= ?)""", ((datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat(timespec="seconds"),
+                                                    monitor_id, moment, int(force), moment))
+            return bool(cursor.rowcount)
+    finally:
+        db.close()
+
+
+def run_media_monitor(path, monitor_id, force=False):
+    if not _claim_media_monitor(path, monitor_id, force):
+        return False
+    _media_monitor_body(path, monitor_id)
+    return True
+
+
+def _media_monitor_worker(path, monitor_id):
+    try:
+        _media_monitor_body(path, monitor_id)
+    except Exception as exc:
+        print("Media run error:", repr(exc))
+
+
+def start_media_monitor(path, monitor_id):
+    if not _claim_media_monitor(path, monitor_id, True):
+        return False
+    threading.Thread(target=_media_monitor_worker, args=(path, monitor_id), daemon=True).start()
+    return True
 
 
 def media_scheduler(path, stop):
@@ -1827,10 +1853,9 @@ class Handler(BaseHTTPRequestHandler):
             self.read_json()
             if not row["enabled"]:
                 raise ApiError(409, "Сначала включите мониторинг")
-            if not run_media_monitor(self.db_path, monitor_id, force=True):
+            if not start_media_monitor(self.db_path, monitor_id):
                 raise ApiError(409, "Сбор уже выполняется")
-            result = db.execute("SELECT last_result FROM media_monitors WHERE id = ?", (monitor_id,)).fetchone()
-            self.send_json(200, {"result": json.loads(result["last_result"])})
+            self.send_json(202, {"started": True})
             return
         if action is None and method == "PATCH":
             data = self.read_json()
