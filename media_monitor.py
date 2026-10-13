@@ -141,7 +141,7 @@ def _telegram_client():
     proxy = telegram_proxy()
     if mtproto and proxy:
         raise ValueError("Задайте только один тип Telegram-прокси: MTProto или SOCKS5")
-    options = {}
+    options = {"timeout": 45, "connection_retries": 5, "request_retries": 5}
     if mtproto:
         options.update({"connection": connection.ConnectionTcpMTProxyRandomizedIntermediate, "proxy": mtproto})
     elif proxy:
