@@ -1787,11 +1787,25 @@ class Handler(BaseHTTPRequestHandler):
                 personas = json.loads(session["personas"] or "[]") or [
                     {"name": f"Участник {i}", "prompt": ""} for i in range(1, session["participants"] + 1)]
                 payload = make_turn_payload(session["guide"], personas, history, question, evidence)
-                raw = deepseek_answer(payload, deepseek_key(), timeout=120, max_bytes=131072)
-                try:
-                    replies = parse_replies(raw, session["participants"], evidence)
-                except ValueError as exc:
-                    raise ApiError(502, str(exc)) from exc
+                base_system = payload["messages"][0]["content"]
+                allowed_ids = [row["id"] for row in evidence]
+                replies = None
+                last_error = None
+                for attempt in range(3):
+                    if attempt:
+                        payload["temperature"] = min(1.0, payload["temperature"] + 0.1)
+                        payload["messages"][0]["content"] = base_system + (
+                            " ПОВТОР: предыдущий ответ не подтвердил реплики источниками. "
+                            "В поле source_ids бери значения ТОЛЬКО из этого списка допустимых ID: "
+                            + json.dumps(allowed_ids) + ", по 1–3 на каждую реплику.")
+                    raw = deepseek_answer(payload, deepseek_key(), timeout=120, max_bytes=131072)
+                    try:
+                        replies = parse_replies(raw, session["participants"], evidence)
+                        break
+                    except ValueError as exc:
+                        last_error = exc
+                if replies is None:
+                    raise ApiError(502, str(last_error))
                 stamp = now()
                 db.execute("INSERT INTO digital_focus_messages (session_id, speaker, body, created_at) VALUES (?, 0, ?, ?)",
                            (session_id, question, stamp))

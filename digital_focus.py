@@ -101,7 +101,19 @@ def parse_replies(raw, participants, evidence):
         text, ids = reply.get("text"), reply.get("source_ids")
         if not isinstance(text, str) or not text.strip() or len(text) > 1800:
             raise ValueError("ИИ вернул некорректную реплику")
-        if not isinstance(ids, list) or not 1 <= len(ids) <= 3 or any(type(i) is not int or i not in allowed for i in ids):
+        if not isinstance(ids, list):
             raise ValueError("ИИ не подтвердил реплику комментариями из выборки")
-        result.append((number, text.strip(), list(dict.fromkeys(ids))))
+        cleaned = []
+        for value in ids:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if value in allowed and value not in cleaned:
+                cleaned.append(value)
+            if len(cleaned) == 3:
+                break
+        if not cleaned:
+            raise ValueError("ИИ не подтвердил реплику комментариями из выборки")
+        result.append((number, text.strip(), cleaned))
     return result
