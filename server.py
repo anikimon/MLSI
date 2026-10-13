@@ -1791,6 +1791,7 @@ class Handler(BaseHTTPRequestHandler):
                 allowed_ids = [row["id"] for row in evidence]
                 replies = None
                 last_error = None
+                raw = ""
                 for attempt in range(3):
                     if attempt:
                         payload["temperature"] = min(1.0, payload["temperature"] + 0.1)
@@ -1805,6 +1806,7 @@ class Handler(BaseHTTPRequestHandler):
                     except ValueError as exc:
                         last_error = exc
                 if replies is None:
+                    print("Digital focus parse failed:", str(last_error), "raw:", (raw or "")[:1500])
                     raise ApiError(502, str(last_error))
                 stamp = now()
                 db.execute("INSERT INTO digital_focus_messages (session_id, speaker, body, created_at) VALUES (?, 0, ?, ?)",
