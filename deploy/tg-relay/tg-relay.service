@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram MTProto relay over Cloudflare Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mlsi
+Group=mlsi
+EnvironmentFile=/etc/mlsi-tg-relay.env
+ExecStart=/srv/mlsi/app/.venv/bin/python /srv/mlsi/tg-relay/relay.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
