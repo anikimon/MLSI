@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
-from digital_focus import (make_turn_payload, parse_replies, parse_suggestions, retrieve,
+from digital_focus import (make_turn_payload, parse_replies, parse_suggestions, repeated_speakers, retrieve,
                            suggest_personas_payload, validate_personas)
 from media_monitor import (AGENTS, collect as collect_media, summarize as summarize_media,
                            telegram_search, telegram_start_auth, telegram_status, telegram_subscribe,
@@ -1794,19 +1794,27 @@ class Handler(BaseHTTPRequestHandler):
                 raw = ""
                 for attempt in range(3):
                     if attempt:
-                        payload["temperature"] = min(1.0, payload["temperature"] + 0.1)
+                        payload["temperature"] = min(1.0, payload["temperature"] + 0.05)
                         payload["messages"][0]["content"] = base_system + (
-                            " ПОВТОР: предыдущий ответ не подтвердил реплики источниками. "
-                            "В поле source_ids бери значения ТОЛЬКО из этого списка допустимых ID: "
-                            + json.dumps(allowed_ids) + ", по 1–3 на каждую реплику.")
+                            " ПОВТОР: ответ не принят (" + str(last_error) + "). Не повторяй реплики из "
+                            "your_previous_replies и в source_ids используй только эти ID: "
+                            + json.dumps(allowed_ids) + ", по 1–3 на реплику.")
                     raw = deepseek_answer(payload, deepseek_key(), timeout=120, max_bytes=131072)
                     try:
                         replies = parse_replies(raw, session["participants"], evidence)
-                        break
                     except ValueError as exc:
                         last_error = exc
+                        replies = None
+                        continue
+                    repeated = repeated_speakers(replies, history)
+                    if repeated:
+                        last_error = ValueError("Участники " + ", ".join(str(item) for item in repeated) +
+                                                " повторили свои прошлые реплики")
+                        replies = None
+                        continue
+                    break
                 if replies is None:
-                    print("Digital focus parse failed:", str(last_error), "raw:", (raw or "")[:1500])
+                    print("Digital focus rejected:", str(last_error), "raw:", (raw or "")[:1500])
                     raise ApiError(502, str(last_error))
                 stamp = now()
                 db.execute("INSERT INTO digital_focus_messages (session_id, speaker, body, created_at) VALUES (?, 0, ?, ?)",
