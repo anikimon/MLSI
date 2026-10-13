@@ -13,6 +13,7 @@ import secrets
 import sqlite3
 import threading
 import time
+from array import array
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -140,6 +141,104 @@ def connect(path):
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
     return db
+
+
+EMBEDDINGS_URL = os.getenv("EMBEDDINGS_URL", "http://127.0.0.1:8091/embed")
+EMBEDDING_LOCK = threading.Lock()
+EMBEDDING_SESSIONS = set()
+
+
+def embeddings_enabled():
+    return bool(EMBEDDINGS_URL.strip())
+
+
+def embed_texts(texts):
+    """Call the local embeddings service; return list of vectors or None on any failure."""
+    if not texts:
+        return None
+    try:
+        body = json.dumps({"texts": [str(text)[:2000] for text in texts]}, ensure_ascii=False).encode("utf-8")
+        request = Request(EMBEDDINGS_URL, data=body, headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=180) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        vectors = data.get("vectors")
+        if isinstance(vectors, list) and len(vectors) == len(texts):
+            return vectors
+    except Exception:
+        return None
+    return None
+
+
+def _store_source_vectors(db, pairs):
+    rows = [(source_id, array("f", vector).tobytes(), len(vector), now()) for source_id, vector in pairs]
+    db.executemany("INSERT OR REPLACE INTO source_vectors (source_id, vector, dim, created_at) VALUES (?, ?, ?, ?)", rows)
+
+
+def load_source_vectors(db, source_ids):
+    if not source_ids:
+        return {}
+    vectors = {}
+    for start in range(0, len(source_ids), 500):
+        chunk = source_ids[start:start + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        for row in db.execute(f"SELECT source_id, vector FROM source_vectors WHERE source_id IN ({placeholders})", chunk):
+            values = array("f")
+            values.frombytes(row["vector"])
+            vectors[row["source_id"]] = values
+    return vectors
+
+
+def embed_session_sources(path, session_id):
+    db = connect(path)
+    try:
+        rows = [dict(row) for row in db.execute("""SELECT s.id, s.body FROM digital_focus_sources s
+            WHERE s.session_id = ? AND s.id NOT IN (SELECT source_id FROM source_vectors)""", (session_id,))]
+        for start in range(0, len(rows), 64):
+            batch = rows[start:start + 64]
+            vectors = embed_texts([row["body"] for row in batch])
+            if not vectors:
+                break
+            with db:
+                _store_source_vectors(db, [(batch[index]["id"], vectors[index]) for index in range(len(batch))])
+    except Exception as exc:
+        print("Embedding error:", repr(exc))
+    finally:
+        db.close()
+        with EMBEDDING_LOCK:
+            EMBEDDING_SESSIONS.discard(session_id)
+
+
+def ensure_session_vectors(path, session_id):
+    with EMBEDDING_LOCK:
+        if session_id in EMBEDDING_SESSIONS:
+            return
+        EMBEDDING_SESSIONS.add(session_id)
+    threading.Thread(target=embed_session_sources, args=(path, session_id), daemon=True).start()
+
+
+def semantic_evidence(db, sources, question, guide, history, limit=12):
+    """Embedding-based retrieval; returns ranked rows or None when vectors are unavailable."""
+    vectors = load_source_vectors(db, [row["id"] for row in sources])
+    if len(vectors) < min(len(sources), 10):
+        return None
+    query = question + " " + guide[:1200] + " " + " ".join(str(row.get("body", ""))[:200] for row in history[-6:])
+    query_vector = embed_texts([query])
+    if not query_vector:
+        return None
+    q = query_vector[0]
+    qnorm = math.sqrt(sum(value * value for value in q)) or 1.0
+
+    def cosine(vector):
+        dot = 0.0
+        norm = 0.0
+        for a, b in zip(q, vector):
+            dot += a * b
+            norm += b * b
+        return dot / (qnorm * (math.sqrt(norm) or 1.0))
+
+    ranked = sorted((row for row in sources if row["id"] in vectors),
+                    key=lambda row: cosine(vectors[row["id"]]), reverse=True)
+    return ranked[:limit]
 
 
 def init_db(path):
@@ -282,6 +381,9 @@ def init_db(path):
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS digital_focus_messages_recent ON digital_focus_messages(session_id, id);
+            CREATE TABLE IF NOT EXISTS source_vectors (
+                source_id INTEGER PRIMARY KEY, vector BLOB NOT NULL, dim INTEGER NOT NULL, created_at TEXT NOT NULL
+            );
             """)
             if "personas" not in {row["name"] for row in db.execute("PRAGMA table_info(digital_focus_sessions)")}:
                 db.execute("ALTER TABLE digital_focus_sessions ADD COLUMN personas TEXT NOT NULL DEFAULT '[]'")
@@ -1745,9 +1847,13 @@ class Handler(BaseHTTPRequestHandler):
                 cursor = db.execute("""INSERT INTO digital_focus_sessions
                     (study_id, monitor_id, title, guide, participants, personas, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (study_id, monitor_id, title, guide, participants, json.dumps(personas, ensure_ascii=False), now()))
+                session_id = cursor.lastrowid
                 db.executemany("INSERT INTO digital_focus_sources (session_id, url, body) VALUES (?, ?, ?)",
-                               [(cursor.lastrowid, url, body) for url, body in sources])
-                self.send_json(201, {"id": cursor.lastrowid, "source_count": len(sources)})
+                               [(session_id, url, body) for url, body in sources])
+                db.commit()
+                if embeddings_enabled():
+                    ensure_session_vectors(self.db_path, session_id)
+                self.send_json(201, {"id": session_id, "source_count": len(sources)})
                 return
             raise ApiError(405, "Метод не поддерживается")
         session_id = int(session_id)
@@ -1788,7 +1894,13 @@ class Handler(BaseHTTPRequestHandler):
                 history = [dict(row) for row in db.execute("""SELECT speaker, body FROM digital_focus_messages
                     WHERE session_id = ? ORDER BY id DESC LIMIT 26""", (session_id,))][::-1]
                 sources = [dict(row) for row in db.execute("SELECT id, body FROM digital_focus_sources WHERE session_id = ?", (session_id,))]
-                evidence = retrieve(sources, question, session["guide"], history)
+                evidence = None
+                if embeddings_enabled():
+                    evidence = semantic_evidence(db, sources, question, session["guide"], history)
+                    if evidence is None:
+                        ensure_session_vectors(self.db_path, session_id)
+                if evidence is None:
+                    evidence = retrieve(sources, question, session["guide"], history)
                 personas = json.loads(session["personas"] or "[]") or [
                     {"name": f"Участник {i}", "prompt": ""} for i in range(1, session["participants"] + 1)]
                 payload = make_turn_payload(session["guide"], personas, history, question, evidence, speakers=expected)
