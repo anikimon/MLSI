@@ -1774,7 +1774,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True})
             return
         if method == "POST" and action == "turn":
-            question = clean_text(self.read_json().get("question", ""), 2000, True)
+            data = self.read_json()
+            question = clean_text(data.get("question", ""), 2000, True)
+            target = data.get("speaker")
+            if target is not None and (type(target) is not int or not 1 <= target <= session["participants"]):
+                raise ApiError(400, "Некорректный участник")
+            expected = [target] if target else list(range(1, session["participants"] + 1))
             if not DIGITAL_FOCUS_LOCK.acquire(blocking=False):
                 raise ApiError(409, "Другая цифровая группа сейчас формирует ответ")
             try:
@@ -1786,7 +1791,7 @@ class Handler(BaseHTTPRequestHandler):
                 evidence = retrieve(sources, question, session["guide"], history)
                 personas = json.loads(session["personas"] or "[]") or [
                     {"name": f"Участник {i}", "prompt": ""} for i in range(1, session["participants"] + 1)]
-                payload = make_turn_payload(session["guide"], personas, history, question, evidence)
+                payload = make_turn_payload(session["guide"], personas, history, question, evidence, speakers=expected)
                 base_system = payload["messages"][0]["content"]
                 allowed_ids = [row["id"] for row in evidence]
                 replies = None
@@ -1801,7 +1806,7 @@ class Handler(BaseHTTPRequestHandler):
                             + json.dumps(allowed_ids) + ", по 1–3 на реплику.")
                     raw = deepseek_answer(payload, deepseek_key(), timeout=120, max_bytes=131072)
                     try:
-                        replies = parse_replies(raw, session["participants"], evidence)
+                        replies = parse_replies(raw, expected, evidence)
                     except ValueError as exc:
                         last_error = exc
                         replies = None

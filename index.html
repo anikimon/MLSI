@@ -925,13 +925,14 @@
           <details><summary>Гайд модератора</summary><div class="focus-guide" style="white-space:pre-wrap">${esc(session.guide)}</div></details>
           <details><summary>Типажи участников</summary>${personas.map((p,i) => `<p><strong>${i+1}. ${esc(p.name)}</strong><br>${esc(p.prompt || 'Индивидуальный промт не задан')}</p>`).join('')}</details>
           <div class="digital-dialog" aria-live="polite">${messages.length ? messages.map(m => `<article class="chat-message ${m.speaker === 0 ? 'own' : ''}"><header><strong>${m.speaker === 0 ? 'Модератор' : esc(personas[m.speaker-1]?.name || 'Цифровой участник '+m.speaker)}</strong></header><p>${esc(m.body)}</p>${m.sources.length ? `<small>Основано на комментариях: ${m.sources.map(source => `<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">#${source.id}</a>`).join(', ')}</small>` : ''}</article>`).join('') : '<p class="muted">Начните с вопроса из гайда.</p>'}</div>
-          ${session.finished ? '<p class="muted">Группа завершена. Диалог сохранён.</p>' : `<form id="digital-turn" class="form-grid"><label class="field-label">Реплика модератора<textarea name="question" maxlength="2000" required placeholder="Задайте вопрос или предложите участникам обсудить ответы друг друга"></textarea></label><button class="btn" type="submit">Отправить и получить ответы</button></form><button id="digital-finish" class="btn small secondary" type="button">Завершить группу</button>`}`,true);
+          ${session.finished ? '<p class="muted">Группа завершена. Диалог сохранён.</p>' : `<form id="digital-turn" class="form-grid"><label class="field-label">Кому адресован вопрос<select name="speaker"><option value="">Всем участникам</option>${personas.map((p,i) => `<option value="${i+1}">${i+1}. ${esc(p.name)}</option>`).join('')}</select></label><label class="field-label">Вопрос модератора<textarea name="question" maxlength="2000" required placeholder="Задайте вопрос участникам"></textarea></label><button class="btn" type="submit">Отправить и получить ответы</button></form><button id="digital-finish" class="btn small secondary" type="button">Завершить группу</button>`}`,true);
         document.querySelector('.digital-dialog').scrollTop = document.querySelector('.digital-dialog').scrollHeight;
         const form = document.querySelector('#digital-turn');
         if (form) form.onsubmit = async event => {
-          event.preventDefault(); const question = form.elements.question.value.trim(), button = form.querySelector('button');
+          event.preventDefault(); const question = form.elements.question.value.trim(), button = form.querySelector('button'), payload = {question};
+          if (form.elements.speaker && form.elements.speaker.value) payload.speaker = Number(form.elements.speaker.value);
           if (!question) return; button.disabled = true; button.textContent = 'Участники отвечают…';
-          try { await api(base+'/turn','POST',{question}); await openDigitalFocus(s,id); }
+          try { await api(base+'/turn','POST',payload); await openDigitalFocus(s,id); }
           catch (error) { notify(error.message,true); button.disabled = false; button.textContent = 'Отправить и получить ответы'; }
         };
         const finish = document.querySelector('#digital-finish');
