@@ -19,7 +19,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from demo_study import ensure_demo_study
@@ -43,6 +43,49 @@ MAX_AUDIO = 24 * 1024 * 1024
 ASR_LOCK = threading.Lock()
 ASR_MODEL = None
 DIGITAL_FOCUS_LOCK = threading.Lock()
+YANDEX_AUTHORIZE_URL = "https://oauth.yandex.com/authorize"
+YANDEX_TOKEN_URL = "https://oauth.yandex.com/token"
+YANDEX_INFO_URL = "https://login.yandex.ru/info"
+YANDEX_STATE_LOCK = threading.Lock()
+YANDEX_STATES = {}
+
+
+def yandex_config():
+    client_id = os.getenv("YANDEX_CLIENT_ID", "").strip()
+    client_secret = os.getenv("YANDEX_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        return None
+    redirect = os.getenv("YANDEX_REDIRECT_URI", "https://mlsilab.ru/api/auth/yandex/callback").strip()
+    return {"client_id": client_id, "client_secret": client_secret, "redirect": redirect}
+
+
+def yandex_profile(code):
+    """Exchange a Yandex OAuth code for the account's verified email and name."""
+    config = yandex_config()
+    if not config:
+        raise ApiError(503, "Вход через Яндекс не настроен")
+    body = urlencode({"grant_type": "authorization_code", "code": code, "client_id": config["client_id"],
+                      "client_secret": config["client_secret"]}).encode("utf-8")
+    token_request = Request(YANDEX_TOKEN_URL, data=body,
+                            headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urlopen(token_request, timeout=15) as response:
+            token = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, ValueError, OSError) as exc:
+        raise ApiError(502, "Яндекс не подтвердил вход. Попробуйте ещё раз") from exc
+    access_token = token.get("access_token")
+    if not access_token:
+        raise ApiError(502, "Яндекс не вернул токен доступа")
+    info_request = Request(YANDEX_INFO_URL + "?format=json", headers={"Authorization": "OAuth " + access_token})
+    try:
+        with urlopen(info_request, timeout=15) as response:
+            info = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, ValueError, OSError) as exc:
+        raise ApiError(502, "Не удалось получить профиль Яндекса") from exc
+    emails = info.get("emails") or []
+    email = (info.get("default_email") or (emails[0] if emails else "") or "").strip().lower()
+    name = (info.get("real_name") or info.get("display_name") or info.get("login") or "").strip()
+    return {"email": email, "name": name}
 
 
 def transcribe_audio(content, suffix):
@@ -532,6 +575,56 @@ class Handler(BaseHTTPRequestHandler):
         secure = "; Secure" if os.getenv("COOKIE_SECURE", "1" if os.getenv("AMVERA") == "1" else "0") == "1" else ""
         return f"lab_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000{secure}"
 
+    def redirect_to(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def yandex_start(self, db):
+        config = yandex_config()
+        if not config:
+            raise ApiError(503, "Вход через Яндекс не настроен")
+        state = secrets.token_urlsafe(24)
+        with YANDEX_STATE_LOCK:
+            moment = datetime.now(timezone.utc).timestamp()
+            for key, expiry in list(YANDEX_STATES.items()):
+                if expiry < moment:
+                    YANDEX_STATES.pop(key, None)
+            YANDEX_STATES[state] = moment + 600
+        query = urlencode({"response_type": "code", "client_id": config["client_id"],
+                           "redirect_uri": config["redirect"], "scope": "login:email login:info", "state": state})
+        self.redirect_to(f"{YANDEX_AUTHORIZE_URL}?{query}")
+
+    def yandex_callback(self, db):
+        config = yandex_config()
+        if not config:
+            raise ApiError(503, "Вход через Яндекс не настроен")
+        params = parse_qs(urlsplit(self.path).query)
+        code = (params.get("code") or [""])[0]
+        state = (params.get("state") or [""])[0]
+        error = (params.get("error") or [""])[0]
+        with YANDEX_STATE_LOCK:
+            expiry = YANDEX_STATES.pop(state, None)
+        if error or not code or not expiry or expiry < datetime.now(timezone.utc).timestamp():
+            self.redirect_to("/?auth=yandex_error")
+            return
+        profile = yandex_profile(code)
+        row = db.execute("SELECT id FROM users WHERE email = ?", (profile["email"],)).fetchone() if profile["email"] else None
+        if not row:
+            self.redirect_to("/?auth=yandex_denied")
+            return
+        with self.login_lock:
+            self.failed_logins.pop(self.client_address[0], None)
+        cookie = self.create_session(db, row["id"])
+        self.send_response(302)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", cookie)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def handle_request(self):
         path = urlsplit(self.path).path
         try:
@@ -595,7 +688,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/session" and method == "GET":
             user = self.current_user(db)
             setup = not db.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-            self.send_json(200, {"user": user, "setup": setup})
+            self.send_json(200, {"user": user, "setup": setup, "yandex": bool(yandex_config())})
             return
         if path == "/api/setup" and method == "POST":
             data = self.read_json()
@@ -635,6 +728,12 @@ class Handler(BaseHTTPRequestHandler):
             if "lab_session" in cookie:
                 db.execute("DELETE FROM sessions WHERE token_hash = ?", (hashlib.sha256(cookie["lab_session"].value.encode()).hexdigest(),))
             self.send_json(200, {"ok": True}, {"Set-Cookie": "lab_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"})
+            return
+        if path == "/api/auth/yandex/start" and method == "GET":
+            self.yandex_start(db)
+            return
+        if path == "/api/auth/yandex/callback" and method == "GET":
+            self.yandex_callback(db)
             return
 
         public = re.fullmatch(r"/api/public/([A-Za-z0-9_-]{32,80})", path)
