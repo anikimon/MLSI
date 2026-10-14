@@ -1,4 +1,4 @@
-const CACHE = 'mlsi-field-v17';
+const CACHE = 'mlsi-field-v18';
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
