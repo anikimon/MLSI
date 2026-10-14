@@ -700,8 +700,15 @@
         if (documentSelect.value === 'questionnaire') {
           try {
             const extra = parseDraftQuestions(body.value);
-            const existing = Array.isArray(s.questions) ? s.questions : [];
+            let existing = Array.isArray(s.questions) ? s.questions : [];
+            try {
+              const fresh = await api('/studies');
+              const serverStudy = fresh.studies.find(item => item.id === s.id);
+              if (Array.isArray(serverStudy?.questions)) existing = serverStudy.questions;
+            } catch {}
+            if (!existing.length && body.value.trim() && s.questions?.length) existing = s.questions;
             editQuestions(s, [...existing, ...extra]);
+            notify(`В конструкторе: ${existing.length + extra.length} вопросов (из них из редактора: ${extra.length}).`);
           } catch (error) { notify(error.message,true); }
         } else newFocus(s,body.value);
       };
