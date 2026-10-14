@@ -109,7 +109,7 @@ class PlannerTest(unittest.TestCase):
         def answer(payload, key, **kwargs):
             evidence = json.loads(payload["messages"][1]["content"])["evidence"]
             self.assertTrue(all("деревьев" in row["text"] for row in evidence))
-            self.assertIn("реагируют на реплики", payload["messages"][0]["content"])
+            self.assertIn("НЕЗАВИСИМО", payload["messages"][0]["content"])
             return json.dumps({"replies": [{"speaker": i, "text": f"Участник {i} отвечает предыдущему",
                 "source_ids": [evidence[i-1]["id"]]} for i in range(1, 4)]})
 
