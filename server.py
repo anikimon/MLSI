@@ -536,13 +536,80 @@ def csv_safe(value):
     return text
 
 
+def condition_met(condition, value, source_visible):
+    if not source_visible:
+        return False
+    kind = condition.get("type")
+    if kind == "equals":
+        return value == condition.get("value")
+    if kind == "not_equals":
+        return value != condition.get("value")
+    if kind == "includes":
+        return isinstance(value, list) and condition.get("value") in value
+    if kind == "not_includes":
+        return not (isinstance(value, list) and condition.get("value") in value)
+    if kind in ("between", "not_between"):
+        try:
+            number = float(str(value).replace(",", "."))
+        except (TypeError, ValueError):
+            return False
+        low, high = condition.get("min"), condition.get("max")
+        matched = (low is None or number >= low) and (high is None or number < high)
+        return matched if kind == "between" else not matched
+    return True
+
+
+def visible_questions(questions, answers):
+    """Questions whose show-if condition is satisfied by the given answers (in order)."""
+    visible = set()
+    result = []
+    for question in questions:
+        condition = question.get("condition")
+        if not condition or condition_met(condition, answers.get(condition.get("source")),
+                                          condition.get("source") in visible):
+            visible.add(question["id"])
+            result.append(question)
+    return result
+
+
+def clean_condition(condition, questions):
+    if condition in (None, "", {}):
+        return None
+    if not isinstance(condition, dict):
+        raise ApiError(400, "Некорректное условие показа")
+    source = condition.get("source")
+    source_question = next((item for item in questions if item["id"] == source), None)
+    if not source_question:
+        raise ApiError(400, "Условие должно ссылаться на предыдущий вопрос")
+    kind = condition.get("type")
+    if source_question["type"] in ("single", "multiple"):
+        allowed = ("equals", "not_equals") if source_question["type"] == "single" else ("includes", "not_includes")
+        if kind not in allowed or condition.get("value") not in source_question["options"]:
+            raise ApiError(400, "Некорректное условие для вопроса с выбором")
+        return {"source": source, "type": kind, "value": condition["value"]}
+    if source_question["type"] == "number":
+        if kind not in ("between", "not_between"):
+            raise ApiError(400, "Некорректное условие для числового вопроса")
+        try:
+            low = float(condition["min"]) if condition.get("min") not in (None, "") else None
+            high = float(condition["max"]) if condition.get("max") not in (None, "") else None
+        except (ValueError, TypeError):
+            raise ApiError(400, "Некорректные границы условия")
+        if low is None and high is None:
+            raise ApiError(400, "Укажите хотя бы одну границу условия")
+        if low is not None and high is not None and low >= high:
+            raise ApiError(400, "Нижняя граница должна быть меньше верхней")
+        return {"source": source, "type": kind, "min": low, "max": high}
+    raise ApiError(400, "Условие можно задать только для вопроса с выбором или числом")
+
+
 def normalize_answers(questions, answers):
     if not isinstance(answers, dict):
         raise ApiError(400, "Некорректные ответы")
     if set(answers) - {q["id"] for q in questions}:
         raise ApiError(400, "Анкета изменилась. Обновите страницу")
     normalized = {}
-    for q in questions:
+    for q in visible_questions(questions, answers):
         value = answers.get(q["id"], [] if q["type"] == "multiple" else "")
         if q["type"] == "multiple":
             if not isinstance(value, list) or len(value) > len(q["options"]) or any(v not in q["options"] for v in value):
@@ -1356,7 +1423,9 @@ class Handler(BaseHTTPRequestHandler):
                         raise ApiError(400, "Варианты ответа не должны повторяться")
                 else:
                     opts = []
-                questions.append({"id": f"q{index + 1}", "label": label, "type": q["type"], "required": q.get("required") is True, "options": opts})
+                condition = clean_condition(q.get("condition"), questions)
+                questions.append({"id": f"q{index + 1}", "label": label, "type": q["type"],
+                                  "required": q.get("required") is True, "options": opts, "condition": condition})
             db.execute("INSERT INTO questionnaires VALUES (?, ?, ?) ON CONFLICT(study_id) DO UPDATE SET questions=excluded.questions, updated_at=excluded.updated_at", (study_id, json.dumps(questions, ensure_ascii=False), now()))
             self.send_json(200, {"questions": questions})
             return

@@ -1080,12 +1080,13 @@
       app.innerHTML = '<main class="public-wrap"><h1>Онлайн-опрос</h1><p class="muted">Загружаем анкету…</p></main>';
       try {
         const survey = await api(`/public/${token}`);
-        app.innerHTML = `<main class="public-wrap"><div class="eyebrow">НИЛ «МЛСИ» · Анонимная анкета</div><h1>${esc(survey.title)}</h1><p class="lead">Ответьте на вопросы и отправьте анкету. Вход в систему не нужен. Не указывайте персональные данные без необходимости.</p><section class="box"><form id="public-form" class="form-grid">${survey.questions.map((q,i) => `<div class="survey-item"><strong>${i+1}. ${esc(q.label)}${q.required ? ' *' : ''}</strong>${q.type === 'single' || q.type === 'multiple' ? q.options.map(option => `<label class="survey-choice"><input type="${q.type === 'single' ? 'radio' : 'checkbox'}" name="${esc(q.id)}" value="${esc(option)}">${esc(option)}</label>`).join('') : q.type === 'textarea' ? `<textarea name="${esc(q.id)}" maxlength="2000" ${q.required ? 'required' : ''}></textarea>` : `<input name="${esc(q.id)}" type="${q.type === 'number' ? 'number' : 'text'}" ${q.type === 'number' ? 'step="any"' : ''} maxlength="2000" ${q.required ? 'required' : ''}>`}</div>`).join('')}<button class="btn" type="submit">Отправить ответы</button></form></section></main>`;
+        app.innerHTML = `<main class="public-wrap"><div class="eyebrow">НИЛ «МЛСИ» · Анонимная анкета</div><h1>${esc(survey.title)}</h1><p class="lead">Ответьте на вопросы и отправьте анкету. Вход в систему не нужен. Не указывайте персональные данные без необходимости.</p><section class="box"><form id="public-form" class="form-grid">${survey.questions.map((q,i) => `<div class="survey-item" data-qid="${esc(q.id)}"><strong>${i+1}. ${esc(q.label)}${q.required ? ' *' : ''}</strong>${q.type === 'single' || q.type === 'multiple' ? q.options.map(option => `<label class="survey-choice"><input type="${q.type === 'single' ? 'radio' : 'checkbox'}" name="${esc(q.id)}" value="${esc(option)}">${esc(option)}</label>`).join('') : q.type === 'textarea' ? `<textarea name="${esc(q.id)}" maxlength="2000" ${q.required ? 'required' : ''}></textarea>` : `<input name="${esc(q.id)}" type="${q.type === 'number' ? 'number' : 'text'}" ${q.type === 'number' ? 'step="any"' : ''} maxlength="2000" ${q.required ? 'required' : ''}>`}</div>`).join('')}<button class="btn" type="submit">Отправить ответы</button></form></section></main>`;
         let id = null;
-        document.querySelector('#public-form').onsubmit = async event => {
-          event.preventDefault(); const form = event.currentTarget, data = new FormData(form), answers = {};
-          for (const q of survey.questions) answers[q.id] = q.type === 'multiple' ? data.getAll(q.id) : data.get(q.id) || '';
-          if (survey.questions.some(q => q.required && !answers[q.id].length)) return notify('Ответьте на обязательные вопросы.',true);
+        const publicForm = document.querySelector('#public-form');
+        const publicCtl = bindConditional(publicForm, survey.questions);
+        publicForm.onsubmit = async event => {
+          event.preventDefault(); const form = event.currentTarget, answers = publicCtl.answers(), visible = publicCtl.visible();
+          if (survey.questions.some(q => visible.has(q.id) && q.required && !(Array.isArray(answers[q.id]) ? answers[q.id].length : String(answers[q.id] || '').length))) return notify('Ответьте на обязательные вопросы.',true);
           id ||= crypto.randomUUID(); const button = form.querySelector('button'); button.disabled = true;
           try { await api(`/public/${token}`,'POST',{client_id:id,answers}); app.innerHTML = '<main class="public-wrap"><section class="box"><h1>Спасибо за участие!</h1><p class="lead">Ответы сохранены. Можно закрыть страницу.</p></section></main>'; }
           catch (error) { notify(error.message,true); button.disabled = false; }
@@ -1386,21 +1387,109 @@
       show();
     }
     function questionBlock(q={ type:'text', label:'', options:[], required:false }) {
-      return `<div class="question-edit"><div class="question-top"><strong>ВОПРОС</strong><button type="button" class="text-button remove-question">Удалить</button></div><div class="form-two"><div><label class="field-label">Формулировка *</label><input class="q-label" required maxlength="250" value="${esc(q.label)}" placeholder="Ваш вопрос"></div><div><label class="field-label">Тип ответа</label><select class="q-type">${Object.entries(types).map(([key,label]) => `<option value="${key}" ${q.type === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><div class="q-options-wrap" style="${['single','multiple'].includes(q.type) ? '' : 'display:none'}"><label class="field-label">Варианты ответа (по одному на строке)</label><textarea class="q-options" placeholder="Да&#10;Нет&#10;Затрудняюсь ответить">${esc(q.options.join('\n'))}</textarea></div><label class="check-label"><input class="q-required" type="checkbox" ${q.required ? 'checked' : ''}> Обязательный вопрос</label></div>`;
+      return `<div class="question-edit"><div class="question-top"><strong>ВОПРОС</strong><button type="button" class="text-button remove-question">Удалить</button></div><div class="form-two"><div><label class="field-label">Формулировка *</label><input class="q-label" required maxlength="250" value="${esc(q.label)}" placeholder="Ваш вопрос"></div><div><label class="field-label">Тип ответа</label><select class="q-type">${Object.entries(types).map(([key,label]) => `<option value="${key}" ${q.type === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><div class="q-options-wrap" style="${['single','multiple'].includes(q.type) ? '' : 'display:none'}"><label class="field-label">Варианты ответа (по одному на строке)</label><textarea class="q-options" placeholder="Да&#10;Нет&#10;Затрудняюсь ответить">${esc(q.options.join('\n'))}</textarea></div><label class="check-label"><input class="q-required" type="checkbox" ${q.required ? 'checked' : ''}> Обязательный вопрос</label><div class="q-cond"></div></div>`;
+    }
+    function rowMeta(row) {
+      return { type: row.querySelector('.q-type').value, options: row.querySelector('.q-options').value.split('\n').map(v => v.trim()).filter(Boolean) };
+    }
+    function condDetail(meta, cond) {
+      if (meta.type === 'single' || meta.type === 'multiple') {
+        const ops = meta.type === 'single' ? [['equals', 'равен'], ['not_equals', 'не равен']] : [['includes', 'содержит'], ['not_includes', 'не содержит']];
+        const selected = ops.some(([v]) => v === cond?.type) ? cond.type : ops[0][0];
+        return `<select class="q-cond-op">${ops.map(([v, l]) => `<option value="${v}" ${selected === v ? 'selected' : ''}>${l}</option>`).join('')}</select><select class="q-cond-val">${meta.options.map(o => `<option value="${esc(o)}" ${cond?.value === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+      }
+      if (meta.type === 'number') {
+        const selected = cond?.type === 'not_between' ? 'not_between' : 'between';
+        return `<select class="q-cond-op"><option value="between" ${selected === 'between' ? 'selected' : ''}>в диапазоне</option><option value="not_between" ${selected === 'not_between' ? 'selected' : ''}>вне диапазона</option></select><input class="q-cond-min" type="number" step="any" placeholder="От" value="${cond?.min ?? ''}"><input class="q-cond-max" type="number" step="any" placeholder="До" value="${cond?.max ?? ''}">`;
+      }
+      return '<span class="muted">Для этого типа условия недоступны</span>';
+    }
+    function refreshConditions(list) {
+      const rows = [...list.querySelectorAll('.question-edit')];
+      rows.forEach((row, index) => {
+        const box = row.querySelector('.q-cond');
+        const stored = row.dataset.condition ? JSON.parse(row.dataset.condition) : null;
+        const earlier = rows.slice(0, index);
+        if (!earlier.length) { box.innerHTML = ''; row.dataset.condition = ''; return; }
+        const sourceIndex = stored ? parseInt(stored.source.slice(1), 10) - 1 : -1;
+        box.innerHTML = `<label class="field-label">Показывать вопрос</label><select class="q-cond-source"><option value="">— всегда —</option>${earlier.map((r, i) => `<option value="${i}" ${sourceIndex === i ? 'selected' : ''}>после вопроса №${i + 1}</option>`).join('')}</select><span class="q-cond-detail"></span>`;
+        const detail = box.querySelector('.q-cond-detail');
+        const update = () => {
+          const src = box.querySelector('.q-cond-source').value;
+          if (src === '') { row.dataset.condition = ''; return; }
+          const sourceRow = earlier[Number(src)];
+          const meta = rowMeta(sourceRow);
+          const op = detail.querySelector('.q-cond-op')?.value;
+          if (!op) { row.dataset.condition = ''; return; }
+          const sourceId = 'q' + (Number(src) + 1);
+          if (meta.type === 'number') {
+            const low = detail.querySelector('.q-cond-min').value, high = detail.querySelector('.q-cond-max').value;
+            row.dataset.condition = JSON.stringify({ source: sourceId, type: op, min: low === '' ? null : Number(low), max: high === '' ? null : Number(high) });
+          } else {
+            row.dataset.condition = JSON.stringify({ source: sourceId, type: op, value: detail.querySelector('.q-cond-val')?.value || '' });
+          }
+        };
+        const render = () => {
+          const src = box.querySelector('.q-cond-source').value;
+          if (src === '') { detail.innerHTML = ''; row.dataset.condition = ''; return; }
+          const meta = rowMeta(earlier[Number(src)]);
+          detail.innerHTML = condDetail(meta, (sourceIndex === Number(src)) ? stored : null);
+          update();
+        };
+        box.querySelector('.q-cond-source').onchange = () => { row.dataset.condition = ''; render(); };
+        box.oninput = update; box.onchange = update;
+        render();
+      });
+    }
+    function conditionOk(condition, value) {
+      if (!condition) return true;
+      if (condition.type === 'equals') return value === condition.value;
+      if (condition.type === 'not_equals') return value !== condition.value;
+      if (condition.type === 'includes') return Array.isArray(value) && value.includes(condition.value);
+      if (condition.type === 'not_includes') return !(Array.isArray(value) && value.includes(condition.value));
+      if (condition.type === 'between' || condition.type === 'not_between') {
+        const number = parseFloat(String(value).replace(',', '.'));
+        if (Number.isNaN(number)) return false;
+        const ok = (condition.min == null || number >= condition.min) && (condition.max == null || number < condition.max);
+        return condition.type === 'between' ? ok : !ok;
+      }
+      return true;
+    }
+    function bindConditional(form, questions) {
+      const items = new Map(questions.map(q => [q.id, form.querySelector(`[data-qid="${q.id}"]`)]));
+      const read = () => { const data = new FormData(form); const answers = {}; for (const q of questions) answers[q.id] = q.type === 'multiple' ? data.getAll(q.id) : (data.get(q.id) ?? ''); return answers; };
+      const visibleSet = answers => { const seen = new Set(); for (const q of questions) if (!q.condition || (seen.has(q.condition.source) && conditionOk(q.condition, answers[q.condition.source]))) seen.add(q.id); return seen; };
+      const apply = () => {
+        const seen = visibleSet(read());
+        for (const q of questions) {
+          const el = items.get(q.id); if (!el) continue;
+          const ok = seen.has(q.id); el.hidden = !ok;
+          el.querySelectorAll('input,textarea,select').forEach(input => { input.disabled = !ok; input.required = !!q.required && ok; });
+        }
+      };
+      form.addEventListener('input', apply); form.addEventListener('change', apply); apply();
+      return {
+        answers() { const answers = read(), seen = visibleSet(answers), out = {}; for (const q of questions) if (seen.has(q.id)) out[q.id] = answers[q.id]; return out; },
+        visible() { return visibleSet(read()); }
+      };
     }
     function editQuestions(s, draft=s.questions) {
       openModal('Анкета исследования',`<p class="muted">Проверьте типы вопросов, варианты ответа и обязательность перед сохранением. После сбора ответов или настройки квот изменение действующей анкеты запрещено. До 40 вопросов.</p><div id="question-list">${draft.map(questionBlock).join('')}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small secondary" id="add-question">+ Добавить вопрос</button><label class="btn small secondary" style="cursor:pointer">Импорт JSON <input id="import-questions" type="file" accept=".json,application/json" hidden></label></div><div class="actions"><button type="button" class="btn secondary" id="cancel">Отмена</button><button type="button" class="btn" id="save-questions">Сохранить анкету</button></div>`,true);
       const list = document.querySelector('#question-list');
       document.querySelector('#cancel').onclick = closeModal;
-      document.querySelector('#add-question').onclick = () => { if (list.children.length >= 40) { notify('Не более 40 вопросов',true); return; } list.insertAdjacentHTML('beforeend',questionBlock()); };
-      list.onchange = event => { if (event.target.classList.contains('q-type')) event.target.closest('.question-edit').querySelector('.q-options-wrap').style.display = ['single','multiple'].includes(event.target.value) ? '' : 'none'; };
-      list.onclick = event => { if (event.target.classList.contains('remove-question')) event.target.closest('.question-edit').remove(); };
-      document.querySelector('#import-questions').onchange = async event => { const file = event.target.files[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const questions = Array.isArray(data) ? data : data.questions; if (!Array.isArray(questions) || questions.length > 40 || questions.some(q => !q || typeof q.label !== 'string' || !types[q.type] || !Array.isArray(q.options || []))) throw new Error('Неверный формат файла'); list.innerHTML = questions.map(q => questionBlock({ ...q, options:q.options || [] })).join(''); notify('Анкета импортирована. Нажмите «Сохранить анкету».'); } catch (error) { notify(error.message,true); } };
-      document.querySelector('#save-questions').onclick = async () => { const questions = [...list.children].map(item => ({ label:item.querySelector('.q-label').value.trim(), type:item.querySelector('.q-type').value, options:item.querySelector('.q-options').value.split('\n').map(v=>v.trim()).filter(Boolean), required:item.querySelector('.q-required').checked })); if (questions.some(q => !q.label)) { notify('Заполните формулировки вопросов',true); return; } try { await api('/studies/'+s.id+'/questionnaire','POST',{questions}); closeModal(); await refresh(); notify('Анкета сохранена'); } catch (error) { notify(error.message,true); } };
+      [...list.querySelectorAll('.question-edit')].forEach((row, i) => { if (draft[i] && draft[i].condition) row.dataset.condition = JSON.stringify(draft[i].condition); });
+      refreshConditions(list);
+      document.querySelector('#add-question').onclick = () => { if (list.children.length >= 40) { notify('Не более 40 вопросов',true); return; } list.insertAdjacentHTML('beforeend',questionBlock()); refreshConditions(list); };
+      list.onchange = event => { if (event.target.classList.contains('q-type')) { event.target.closest('.question-edit').querySelector('.q-options-wrap').style.display = ['single','multiple'].includes(event.target.value) ? '' : 'none'; refreshConditions(list); } };
+      list.onclick = event => { if (event.target.classList.contains('remove-question')) { event.target.closest('.question-edit').remove(); refreshConditions(list); } };
+      document.querySelector('#import-questions').onchange = async event => { const file = event.target.files[0]; if (!file) return; try { const data = JSON.parse(await file.text()); const questions = Array.isArray(data) ? data : data.questions; if (!Array.isArray(questions) || questions.length > 40 || questions.some(q => !q || typeof q.label !== 'string' || !types[q.type] || !Array.isArray(q.options || []))) throw new Error('Неверный формат файла'); list.innerHTML = questions.map(q => questionBlock({ ...q, options:q.options || [] })).join(''); refreshConditions(list); notify('Анкета импортирована. Нажмите «Сохранить анкету».'); } catch (error) { notify(error.message,true); } };
+      document.querySelector('#save-questions').onclick = async () => { const questions = [...list.children].map(item => ({ label:item.querySelector('.q-label').value.trim(), type:item.querySelector('.q-type').value, options:item.querySelector('.q-options').value.split('\n').map(v=>v.trim()).filter(Boolean), required:item.querySelector('.q-required').checked, condition:item.dataset.condition ? JSON.parse(item.dataset.condition) : null })); if (questions.some(q => !q.label)) { notify('Заполните формулировки вопросов',true); return; } try { await api('/studies/'+s.id+'/questionnaire','POST',{questions}); closeModal(); await refresh(); notify('Анкета сохранена'); } catch (error) { notify(error.message,true); } };
     }
     function openSurvey(s) {
       if (!s.questions.length) return;
-      openModal('Опрос: '+esc(s.title),`<p class="muted">Ответы сохраняются в проекте. Рекомендуем использовать обезличенный код респондента.</p><form id="survey-form" class="form-grid" data-id="${s.id}"><div><label class="field-label">Код респондента (необязательно)</label><input name="code" maxlength="80" placeholder="Например: Р-001" autocomplete="off"></div>${s.questions.map((q,i) => `<div class="survey-item"><strong>${i+1}. ${esc(q.label)} ${q.required ? '<span style="color:var(--orange)">*</span>' : ''}</strong>${q.type === 'single' || q.type === 'multiple' ? q.options.map(option => `<label class="survey-choice"><input type="${q.type === 'single' ? 'radio' : 'checkbox'}" name="${q.id}" value="${esc(option)}">${esc(option)}</label>`).join('') : q.type === 'textarea' ? `<textarea name="${q.id}" ${q.required ? 'required' : ''} maxlength="2000" placeholder="Введите ответ"></textarea>` : `<input name="${q.id}" type="${q.type === 'number' ? 'number' : 'text'}" ${q.type === 'number' ? 'step="any"' : ''} ${q.required ? 'required' : ''} maxlength="2000" placeholder="Введите ответ">`}</div>`).join('')}<div class="actions"><button type="button" class="btn secondary" id="cancel">Отмена</button><button type="submit" class="btn orange">Сохранить ответ →</button></div></form>`,true);
+      openModal('Опрос: '+esc(s.title),`<p class="muted">Ответы сохраняются в проекте. Рекомендуем использовать обезличенный код респондента.</p><form id="survey-form" class="form-grid" data-id="${s.id}"><div><label class="field-label">Код респондента (необязательно)</label><input name="code" maxlength="80" placeholder="Например: Р-001" autocomplete="off"></div>${s.questions.map((q,i) => `<div class="survey-item" data-qid="${esc(q.id)}"><strong>${i+1}. ${esc(q.label)} ${q.required ? '<span style="color:var(--orange)">*</span>' : ''}</strong>${q.type === 'single' || q.type === 'multiple' ? q.options.map(option => `<label class="survey-choice"><input type="${q.type === 'single' ? 'radio' : 'checkbox'}" name="${q.id}" value="${esc(option)}">${esc(option)}</label>`).join('') : q.type === 'textarea' ? `<textarea name="${q.id}" ${q.required ? 'required' : ''} maxlength="2000" placeholder="Введите ответ"></textarea>` : `<input name="${q.id}" type="${q.type === 'number' ? 'number' : 'text'}" ${q.type === 'number' ? 'step="any"' : ''} ${q.required ? 'required' : ''} maxlength="2000" placeholder="Введите ответ">`}</div>`).join('')}<div class="actions"><button type="button" class="btn secondary" id="cancel">Отмена</button><button type="submit" class="btn orange">Сохранить ответ →</button></div></form>`,true);
+      const surveyForm = document.querySelector('#survey-form');
+      surveyForm._conditional = bindConditional(surveyForm, s.questions);
       document.querySelector('#survey-form .actions').insertAdjacentHTML('afterbegin','<button type="button" class="btn secondary" id="record-refusal">Отказ</button>');
       document.querySelector('#record-refusal').onclick = async event => {
         if (!confirm('Зарегистрировать отказ без сохранения заполненной анкеты?')) return;
@@ -1412,9 +1501,10 @@
       document.querySelector('#survey-form').onsubmit = submitSurvey;
     }
     async function submitSurvey(event) {
-      event.preventDefault(); const form = event.currentTarget, s = study(form.dataset.id), data = new FormData(form), answers = {};
-      for (const q of s.questions) answers[q.id] = q.type === 'multiple' ? data.getAll(q.id) : data.get(q.id) || '';
-      if (s.questions.some(q => q.required && !answers[q.id].length)) { notify('Ответьте на все обязательные вопросы.',true); return; }
+      event.preventDefault(); const form = event.currentTarget, s = study(form.dataset.id), data = new FormData(form);
+      const ctl = form._conditional || bindConditional(form, s.questions);
+      const answers = ctl.answers(), visible = ctl.visible();
+      if (s.questions.some(q => visible.has(q.id) && q.required && !(Array.isArray(answers[q.id]) ? answers[q.id].length : String(answers[q.id] || '').length))) { notify('Ответьте на все обязательные вопросы.',true); return; }
       const button = form.querySelector('[type="submit"]'); button.disabled = true;
       try { await queueSurvey(s,'response',{code:data.get('code') || '',answers}); notify('Анкета сохранена на устройстве. Она отправится при доступе к серверу.'); openSurvey(s); }
       catch (error) { notify(`Анкета не сохранена: ${error.message}`,true); button.disabled = false; }
