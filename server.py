@@ -1398,13 +1398,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if action == "questionnaire" and method == "POST":
             self.require(db, {"admin", "researcher"})
-            if (db.execute("SELECT 1 FROM responses WHERE study_id = ? LIMIT 1", (study_id,)).fetchone()
-                    or db.execute("SELECT 1 FROM weighting WHERE study_id = ?", (study_id,)).fetchone()
-                    or db.execute("SELECT 1 FROM study_quotas WHERE study_id = ?", (study_id,)).fetchone()
-                    or db.execute("SELECT 1 FROM study_associations WHERE study_id = ?", (study_id,)).fetchone()
-                    or db.execute("SELECT 1 FROM member_quotas WHERE study_id = ?", (study_id,)).fetchone()
-                    or db.execute("SELECT 1 FROM public_links WHERE study_id = ?", (study_id,)).fetchone()):
-                raise ApiError(409, "Нельзя менять анкету после сбора ответов или при настроенных квотах, весах и анализе связи")
             data = self.read_json()
             raw = data.get("questions")
             if not isinstance(raw, list) or len(raw) > 40:

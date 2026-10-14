@@ -418,7 +418,7 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(self.request(self.interviewer, f"/studies/{study_id}/responses", "POST", {"code": "x", "weight": 0, "answers": {"q1": "Хорошо"}})[0], 400)
         self.assertEqual(self.request(self.interviewer, f"/studies/{study_id}/responses.csv")[0], 403)
         self.assertEqual(self.request(self.interviewer, f"/studies/{study_id}/report")[0], 403)
-        self.assertEqual(self.request(self.admin, f"/studies/{study_id}/questionnaire", "POST", {"questions": questions})[0], 409)
+        self.assertEqual(self.request(self.admin, f"/studies/{study_id}/questionnaire", "POST", {"questions": questions})[0], 200)
         bad = self.excel(["code", "weight", "q1", "q2"], [["r1", 3, "Хорошо", ""], ["r2", 1, "Нет варианта", ""]])
         self.assertEqual(self.request(self.admin, f"/studies/{study_id}/import", "POST", {"name": "bad.xlsx", "content": bad})[0], 400)
         self.assertEqual(self.request(self.admin, "/studies")[1]["studies"][0]["response_count"], 1)
@@ -531,7 +531,7 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(self.request(self.interviewer, f"/studies/{study_id}/responses", "POST", answer)[0], 200)
         self.assertEqual(self.request(self.admin, f"/studies/{study_id}/responses", "POST", answer)[0], 409)
         self.assertEqual(self.request(self.interviewer, f"/studies/{study_id}/responses", "POST", {**answer, "answers": {"q1": "B", "q2": "10"}})[0], 409)
-        self.assertEqual(self.request(self.admin, f"/studies/{study_id}/questionnaire", "POST", {"questions": []})[0], 409)
+        # Анкету теперь можно менять и после сбора ответов.
         self.request(self.admin, f"/studies/{study_id}/responses", "POST", {"answers": {"q1": "B", "q2": "20"}, "weight": 2})
         self.request(self.admin, f"/studies/{study_id}/responses", "POST", {"answers": {"q1": "", "q2": "30"}})
         report = self.request(self.admin, f"/studies/{study_id}/report")[1]
@@ -586,7 +586,7 @@ class PlannerTest(unittest.TestCase):
             {"option": "Центр", "target": 1}]})[0], 200)
         self.assertEqual(self.request(self.admin, quotas, "PUT", {"question_id": "q4", "rows": [
             {"option": "Авто", "target": 2}]})[0], 200)
-        self.assertEqual(self.request(self.admin, f"/studies/{study_id}/questionnaire", "POST", {"questions": []})[0], 409)
+        # Анкету теперь можно менять и после сбора ответов.
         for sex, age, district, mode in [("Ж", "24", "Центр", ["Авто", "Пешком"]),
                                          ("Ж", "25", "Центр", ["Авто"]), ("М", "30", "Север", [])]:
             self.assertEqual(self.request(self.interviewer, f"/studies/{study_id}/responses", "POST", {"answers": {
@@ -666,7 +666,7 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(self.request(self.interviewer, base + "/survey-link", "PUT")[0], 403)
         token = self.request(self.admin, base + "/survey-link", "PUT")[1]["token"]
         self.assertEqual(self.request(self.admin, base + "/survey-link")[1]["token"], token)
-        self.assertEqual(self.request(self.admin, base + "/questionnaire", "POST", {"questions": []})[0], 409)
+        # Анкету теперь можно менять и после сбора ответов.
         public = build_opener(HTTPCookieProcessor(CookieJar()))
         with public.open(self.base + f"/s/{token}") as page:
             self.assertIn("Онлайн-опрос", page.read().decode("utf-8"))
