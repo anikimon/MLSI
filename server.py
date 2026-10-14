@@ -611,16 +611,31 @@ def normalize_answers(questions, answers):
     normalized = {}
     for q in visible_questions(questions, answers):
         value = answers.get(q["id"], [] if q["type"] == "multiple" else "")
+        allow_other = bool(q.get("allow_other"))
         if q["type"] == "multiple":
-            if not isinstance(value, list) or len(value) > len(q["options"]) or any(v not in q["options"] for v in value):
+            if not isinstance(value, list) or len(value) > len(q["options"]) + 1:
                 raise ApiError(400, "Некорректный вариант ответа")
-            value = list(dict.fromkeys(value))
+            cleaned = []
+            custom = 0
+            for item in value:
+                if not isinstance(item, str) or len(item) > 200:
+                    raise ApiError(400, "Некорректный вариант ответа")
+                if item in q["options"]:
+                    if item not in cleaned:
+                        cleaned.append(item)
+                elif allow_other and item.strip():
+                    custom += 1
+                    if custom > 1:
+                        raise ApiError(400, "Некорректный вариант ответа")
+                    if item not in cleaned:
+                        cleaned.append(item)
+                else:
+                    raise ApiError(400, "Некорректный вариант ответа")
+            value = cleaned
         elif not isinstance(value, str) or len(value) > 2000:
             raise ApiError(400, "Ответ слишком длинный")
-        elif q["type"] == "single" and value and value not in q["options"]:
+        elif q["type"] == "single" and value and value not in q["options"] and not (allow_other and value.strip() and len(value) <= 200):
             raise ApiError(400, "Некорректный вариант ответа")
-        elif q["type"] == "number" and value and not re.fullmatch(r"-?\d+(?:[.,]\d+)?", value.strip()):
-            raise ApiError(400, "Введите число")
         if q["required"] and not value:
             raise ApiError(400, f"Ответьте на вопрос: {q['label']}")
         normalized[q["id"]] = value
@@ -1418,7 +1433,9 @@ class Handler(BaseHTTPRequestHandler):
                     opts = []
                 condition = clean_condition(q.get("condition"), questions)
                 questions.append({"id": f"q{index + 1}", "label": label, "type": q["type"],
-                                  "required": q.get("required") is True, "options": opts, "condition": condition})
+                                  "required": q.get("required") is True, "options": opts,
+                                  "allow_other": bool(q.get("allow_other")) and q["type"] in {"single", "multiple"},
+                                  "condition": condition})
             db.execute("INSERT INTO questionnaires VALUES (?, ?, ?) ON CONFLICT(study_id) DO UPDATE SET questions=excluded.questions, updated_at=excluded.updated_at", (study_id, json.dumps(questions, ensure_ascii=False), now()))
             self.send_json(200, {"questions": questions})
             return
