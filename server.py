@@ -1415,8 +1415,8 @@ class Handler(BaseHTTPRequestHandler):
             self.require(db, {"admin", "researcher"})
             data = self.read_json()
             raw = data.get("questions")
-            if not isinstance(raw, list) or len(raw) > 40:
-                raise ApiError(400, "Анкета должна содержать не более 40 вопросов")
+            if not isinstance(raw, list):
+                raise ApiError(400, "Некорректный список вопросов")
             questions = []
             for index, q in enumerate(raw):
                 if not isinstance(q, dict) or q.get("type") not in QUESTION_TYPES:
