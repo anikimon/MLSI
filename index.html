@@ -698,7 +698,12 @@
         const s = study(studySelect.value);
         if (editorState.dirty && !await saveEditor()) return;
         if (documentSelect.value === 'questionnaire') {
-          try { editQuestions(s,parseDraftQuestions(body.value)); } catch (error) { notify(error.message,true); }
+          try {
+            const extra = parseDraftQuestions(body.value);
+            const existing = Array.isArray(s.questions) ? s.questions : [];
+            if (existing.length + extra.length > 40) { notify(`В анкете уже ${existing.length} вопросов, можно добавить не более ${40 - existing.length}.`,true); return; }
+            editQuestions(s, [...existing, ...extra]);
+          } catch (error) { notify(error.message,true); }
         } else newFocus(s,body.value);
       };
       bindAssistant(studySelect,documentSelect,body);
